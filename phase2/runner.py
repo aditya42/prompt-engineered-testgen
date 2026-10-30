@@ -33,8 +33,20 @@ def api(url, email, secret, method="GET", body=None, bearer=False):
             payload = resp.read()
             return json.loads(payload) if payload else {}
     except urllib.error.HTTPError as exc:
-        # No response bodies or authentication headers in logs
-        raise RuntimeError(f"{method} request failed: HTTP {exc.code}") from None
+        # Report only Jira's rejected field names; never log response values or tokens.
+        diagnostic = ""
+        if "/rest/api/3/issue" in url and method == "POST":
+            try:
+                detail = json.loads(exc.read(32768))
+                fields = detail.get("errors", {}) if isinstance(detail, dict) else {}
+                if isinstance(fields, dict) and fields:
+                    names = [str(k)[:80] for k in fields.keys()]
+                    diagnostic = " (rejected fields: " + ", ".join(names[:10]) + ")"
+                else:
+                    diagnostic = " (Jira rejected issue payload; inspect issue type and required fields)"
+            except (ValueError, UnicodeError):
+                diagnostic = " (non-JSON Jira validation response)"
+        raise RuntimeError(f"{method} request failed: HTTP {exc.code}{diagnostic}") from None
 
 def tr(path, method="GET", body=None):
     url = os.environ["TESTRAIL_URL"].rstrip("/") + "/index.php?/api/v2/" + path
@@ -209,6 +221,11 @@ def create_run(apply):
     else:
         print(json.dumps({"dry_run": True, "would_create": payload}))
 
+def clean_error(message):
+    """Remove ANSI escape sequences and non-printable characters from test diagnostics."""
+    message = re.sub(r"\\x1b\\[[0-?]*[ -/]*[@-~]", "", message)
+    return "".join(char for char in message if char.isprintable() or char in "\\n\\t")
+
 def adf(message):
     return {"type": "doc", "version": 1, "content": [
         {"type": "paragraph", "content": [{"type": "text", "text": x or " "}]} for x in message.splitlines()]}
@@ -235,7 +252,7 @@ def sync(apply, create_bugs):
                 final = attempts[-1] if attempts else {}
                 failure = outcome == "unexpected"
                 error = final.get("error") or {}
-                message = str(error.get("message", "")) if isinstance(error, dict) else str(error)
+                message = clean_error(str(error.get("message", "")) if isinstance(error, dict) else str(error))
                 results.append((case_id, failure, message[:2000], spec["title"]))
         for child in node.get("suites", []):
             traverse(child)
