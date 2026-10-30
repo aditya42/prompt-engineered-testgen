@@ -1,19 +1,28 @@
-# TestRail and Jira integration guide
+# SauceDemo Login — connected execution guide
 
-The live success path was verified on GitHub Actions run 41034247358: OpenAI generated `SUB-001`, TestRail case `C1` and run `R1` were created, the generated Playwright test passed, and the result was synchronized to TestRail.
+## Application under test
 
-## Current workflow actions
+- Website: https://www.saucedemo.com/
+- Public demo users: `standard_user` and `locked_out_user`
+- Public demo password: `secret_sauce`
+- Login locators: `[data-test="username"]`, `[data-test="password"]`, `[data-test="login-button"]` and `[data-test="error"]`
 
-- `preview`: run offline unit tests, verify API access and generate a case without external writes.
-- `full-demo`: generate, reconcile existing cases by `[SUB-001]`, create a run, execute Playwright and synchronize TestRail results. It should reuse case `C1` rather than create another case.
-- `jira-demo`: as above, but inject an intentionally wrong assertion and then attempt to create/reuse a **synthetic** Jira Bug in project `KAN` with `synthetic-demo` and `demo-autotest-tr-c1` labels. No production defect is implied.
+## Test generation
 
-All workflow actions are manual. Secrets stay in GitHub Actions. Tests under `tests/` use mocks and do not require live credentials.
+`python -m test_generation.runner generate --provider mock` generates five deterministic login cases. `--provider openai` requests structured plans from OpenAI, then validates them against the same acceptance contract before Playwright compilation.
 
-**Important:** The remote deduplication and Jira negative path were validated in live GitHub Actions executions. Use `jira-demo` only for clearly labeled synthetic demonstrations. Cross-run deduplication is best-effort based on TestRail case titles and Jira labels, not a transactional guarantee. The `jira-demo` action writes a real synthetic Bug to the configured Jira project. Close/remove it after demonstration.
+## Manual GitHub Actions workflow
 
-For the full setup and architecture, see [README.md](../README.md).
+- `preview` generates the login test plans and test spec without remote writes.
+- `full-demo` reconciles TestRail LOGIN-001 through LOGIN-005, creates a run, executes five tests on SauceDemo, and synchronizes pass/fail.
+- `jira-demo` intentionally fails LOGIN-001 and creates/reuses a *synthetic* Jira Bug. This does not indicate a real product defect.
 
-## Execution evidence and retention
+Required GitHub secrets are `TESTRAIL_EMAIL`, `TESTRAIL_API_KEY`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, and `OPENAI_API_KEY` for the OpenAI provider. The configured demo destinations are TestRail project 1/section 1 and Jira project KAN.
 
-New live workflow runs publish a GitHub Actions **Summary** with linked TestRail case/run IDs, any Jira issue key and URL, Playwright counts, and retained/deleted TestRail run IDs. The workflow uses `TESTRAIL_RETENTION_SCOPE=project` and retains only the latest three TestRail runs in project `1`, permanently deleting **all older runs in that project**, including unrelated runs. Test cases, Jira issues, and runs in different TestRail projects are untouched. Use `TESTRAIL_RETENTION_SCOPE=project python -m test_generation.runner prune-runs` to preview; add `--apply` to permanently delete. Retention was verified in [workflow run 41039303473](https://github.com/aditya42/prompt-engineered-testgen/actions/runs/41039303473).
+The old subscription case SUB-001 remains in TestRail but is not mapped to new SauceDemo test runs.
+
+## Retention caution
+
+The live workflow permanently deletes all but the latest **three** TestRail runs in project 1, even runs originating elsewhere. It does not delete TestRail test cases or Jira issues. Before triggering a connected run, export important historical results. Review deletion candidates with `TESTRAIL_RETENTION_SCOPE=project python -m test_generation.runner prune-runs`.
+
+Previous live TestRail/Jira runs demonstrated the former subscription scenario. Validate the new SauceDemo integration using a new manual run before claiming its connected test management flow is proven.
