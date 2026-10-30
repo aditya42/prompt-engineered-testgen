@@ -96,7 +96,7 @@ The workflow uses a concurrency group to avoid overlapping runs. It searches Tes
 
 Following each live `full-demo` or `jira-demo`, GitHub Actions uses **`TESTRAIL_RETENTION_SCOPE=project`** to retain the newest **three test runs in TestRail project `1`** by run ID. **All older runs in that project are permanently deleted, regardless of their names or which workflow created them.** TestRail test cases, Jira issues, and runs in other TestRail projects are not deleted.
 
-Cleanup is attempted after the execution even when the Playwright or Jira step fails. It checks the current run is in the newest three before deleting older runs. Download any historical execution evidence first; this project provides no rollback for deleted TestRail runs.
+Cleanup is attempted after the execution even when the Playwright or Jira step fails. Before deleting each run, the workflow verifies the run belongs to project 1, sends TestRail's explicit deletion payload, and records successful deletions individually. If deletion fails partway through, the artifact records the IDs already removed and the failed run ID. It checks the current run is in the newest three before deleting older runs. Download any historical execution evidence first; this project provides no rollback for deleted TestRail runs.
 
 With the same environment variable, preview the exact run IDs that would be removed:
 
