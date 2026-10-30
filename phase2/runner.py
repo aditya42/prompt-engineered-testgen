@@ -246,7 +246,7 @@ def project_runs():
     return runs
 
 def prune_runs(apply=False, keep=3):
-    """Keep newest N runs managed by this demo; never delete unrelated project runs."""
+    """Keep newest N runs within configured project or managed scope."""
     if keep < 1:
         raise RuntimeError("Retention must preserve at least one run")
     active_id = read(STATE / "run.json", {}).get("id")
@@ -292,7 +292,7 @@ def execution_summary():
              f"- GitHub action: {os.getenv('DEMO_ACTION', 'local')}",
              f"- Generation provider: {read(STATE / 'plan.json', {}).get('provider', 'n/a')}",
              f"- Playwright: **{passed} passed / {failed} failed**",
-             f"- Retention: last **3** managed TestRail runs; deleted: "
+             f"- Retention: last **3** TestRail project runs; deleted: "
              + (", ".join("R" + str(n) for n in retention.get("deleted", [])) or "none"),
              "", "| Resource | Link |", "| --- | --- |"]
     for req, cid in sorted(case_map.items()):
