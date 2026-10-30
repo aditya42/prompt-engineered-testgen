@@ -23,6 +23,20 @@ class Phase2Tests(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
 
+    def test_jira_bug_type_resolved_by_id(self):
+        with patch.object(runner, "jira", return_value={
+            "issueTypes": [{"id": "10001", "name": "Task"},
+                           {"id": "10004", "name": "Bug"}]
+        }):
+            self.assertEqual(runner.jira_issue_type("KAN"), "10004")
+
+    def test_jira_missing_bug_type_fails_without_substitution(self):
+        with patch.object(runner, "jira", return_value={
+            "issueTypes": [{"id": "10001", "name": "Task"}]
+        }):
+            with self.assertRaisesRegex(RuntimeError, "Bug.*unavailable"):
+                runner.jira_issue_type("KAN")
+
     def test_clean_error_removes_terminal_ansi_codes(self):
         dirty = "\x1b[31mAssertion failed\x1b[0m"
         self.assertEqual(runner.clean_error(dirty), "Assertion failed")
