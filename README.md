@@ -1,166 +1,160 @@
-# Prompt-Engineered Test Generation Framework
+# Prompt-Engineered Test Generation
 
-A reproducible **GenAI quality-engineering portfolio project** that converts structured streaming-subscription requirements into validated Playwright tests and connects their execution lifecycle to **TestRail** and **Jira Cloud**.
+**From a written requirement to an executable Playwright test, with TestRail and Jira traceability.**
 
-The application under test, **StreamBox**, is fictional; all scenarios and test data are synthetic. This project is inspired by common streaming subscription QA workflows and does **not** contain Amazon/Prime Video source code, customer information, or internal tooling.
+This open-source quality-engineering demonstration uses Python and OpenAI to turn a structured subscription requirement into validated test steps. It then generates a Playwright test, executes it against a fictional **StreamBox** application, and records the outcome in TestRail. An opt-in negative-test mode demonstrates synthetic Jira defect creation.
 
-## Architecture
+> **Scope:** StreamBox, its user accounts, and the test data are fictional. This repository does not include Prime Video/Amazon internal source code, credentials, or customer data.
+
+## How it works
 
 ```text
-Synthetic subscription requirements (SUB-001)
-           |
-           v
-Prompt strategy + OpenAI Chat Completions (or deterministic mock)
-           |
-           v
-Structured JSON validation, requirement traceability, step allowlist
-           |
-           v
-TestRail project 1, section 1 <--- existing-case reconciliation by [SUB-001]
-           |
-           v
-Generated Playwright / TypeScript tests tagged [TR:C1]
-           |
-           v
-StreamBox demo app -> Playwright JSON report
-           |
-           v
-TestRail run + pass/fail result
-           |
-           +--> Explicit synthetic Jira demo on failure
-                -> check existing Jira label -> create Bug in KAN if absent
+Structured requirement: SUB-001
+        │
+        ▼
+OpenAI or deterministic mock
+        │
+        ▼
+Schema checks + allowed-action validation
+        │
+        ▼
+Generate a Playwright test ──► StreamBox sample app
+        │                                │
+        │                         Playwright JSON
+        ▼                                │
+TestRail case (deduplicated) ◄───────────┘
+        │
+        ├── Execution result: pass / fail
+        └── Optional Jira Bug (explicit synthetic failure only)
+
+GitHub Actions: links + result summary + TestRail run retention
 ```
 
-## What this project demonstrates
+The generator maps a small **allowlist of known actions** to Playwright commands. It does not execute unrestricted code returned by a language model.
 
-- **Prompt engineering:** explicit output schema, allowed automation actions, stable requirement IDs, reference intent, JSON-only response, and output validation.
-- **Safe test generation:** generated steps come from an allowlist translated into known Playwright commands. No free-form model-generated code is executed.
-- **Traceability:** `SUB-001` → TestRail `C<ID>` → Playwright title `[TR:C<ID>]` → TestRail run/result → optional Jira issue.
-- **Cross-run duplicate prevention:** on each live publish, the runner queries TestRail cases for the project and reconciles requirement markers such as `[SUB-001]`, rather than relying on ephemeral GitHub runner files.
-- **Controlled Jira creation:** only the manually selected `jira-demo` workflow action enables issue creation. It intentionally fails a synthetic test, labels the issue `synthetic-demo`, and searches existing Jira issues by a stable case-specific label before creating another one.
-- **CI evidence:** GitHub Actions uploads generated tests and mappings, and adds an execution summary with clickable TestRail and Jira links.
-- **Three-run retention:** After live executions, older runs in TestRail project 1 are permanently deleted, preserving the latest three runs in that project; TestRail cases and other projects are unaffected.
+## What is implemented
 
-### Validated versus unvalidated functionality
-
-A previous live workflow generated one case using OpenAI, published **TestRail C1**, created **run R1**, executed Playwright successfully (1/1 passed), and synchronized the TestRail result. Read-only access to Jira project `KAN` was verified. Subsequent live workflows verified TestRail case reuse, Playwright failure synchronization, and Jira Bug create/reuse in [run 41037773572](https://github.com/aditya42/prompt-engineered-testgen/actions/runs/41037773572). **The newly added retention and Actions summary features require fresh CI validation.** Mock-provider runs are demonstrations, not measurements of LLM output quality.
-
-## Repository layout
-
-| Path | Purpose |
+| Capability | Implementation |
 | --- | --- |
-| `test_generation/runner.py` | JSON-validated generation, TestRail case/run publishing, Playwright compilation, result sync, Jira demo |
-| `sample_app/index.html` | Fictional subscription UI |
-| `sample_app/server.cjs` | Local web server |
-| `playwright.config.ts` | Playwright config, JSON results, and local demo web server |
-| `.github/workflows/verify-integrations.yml` | Read-only API authentication and project access checks |
-| `.github/workflows/test-generation.yml` | Manual preview, live case execution, or synthetic Jira defect demo |
-| `docs/INTEGRATION_GUIDE.md` | Additional integration notes |
-| `state/`, `generated_tests/`, `reports/` | Runtime artifacts (excluded from Git) |
+| Requirement traceability | Stable `SUB-001` requirement ID and `[TR:C<ID>]` Playwright marker |
+| AI-assisted generation | OpenAI Chat Completions or a deterministic mock |
+| Output validation | Requirement coverage, intent, allowed steps, required first/last steps |
+| Test execution | Playwright + TypeScript against the local sample UI |
+| Test management | TestRail case reconciliation, execution run and pass/fail synchronization |
+| Defect demonstration | Intentional failure; create/reuse labeled **synthetic** Jira Bug |
+| CI reporting | GitHub Actions summary, downloadable JSON and mapping artifacts |
+| Run retention | Keep the newest **three execution runs** in the configured TestRail project |
 
-## Configure GitHub Actions
+## Repository structure
 
-In the repository go to **Settings → Secrets and variables → Actions** and create the encrypted repository secrets:
+```text
+prompt-engineered-testgen/
+├── .github/
+│   └── workflows/
+│       ├── test-generation.yml       # Manual end-to-end demonstration
+│       └── verify-integrations.yml   # Read-only external API verification
+├── docs/
+│   ├── ARCHITECTURE.md               # Components and design decisions
+│   └── INTEGRATION_GUIDE.md          # TestRail/Jira setup and operations
+├── sample_app/
+│   ├── index.html                    # Synthetic subscription page
+│   └── server.cjs                    # Local HTTP server
+├── test_generation/
+│   ├── __init__.py
+│   └── runner.py                     # Generation + integration CLI
+├── tests/
+│   └── test_runner.py               # Offline, mocked regression tests
+├── playwright.config.ts
+├── package.json
+├── pyproject.toml
+├── CONTRIBUTING.md
+└── README.md
+```
 
-| Secret | Description |
+The following directories are created during execution and **not committed**:
+
+| Runtime directory | Contents |
 | --- | --- |
-| `TESTRAIL_EMAIL` | TestRail API account email |
-| `TESTRAIL_API_KEY` | Dedicated TestRail API key |
-| `JIRA_EMAIL` | Atlassian account email |
-| `JIRA_API_TOKEN` | Jira Cloud API token |
-| `OPENAI_API_KEY` | Optional; needed only for real OpenAI generation |
+| `generated_tests/` | Generated Playwright `.spec.ts` files |
+| `reports/` | Playwright execution JSON |
+| `state/` | TestRail case/run mappings, result ledger, retention status and summary |
 
-The GitHub workflow currently targets these **demo-only** instance settings:
+## Quick start — no API keys required
 
-- TestRail: `https://testrailspersonal.testrail.io`, project `1`, section `1` (`UserInterface`)
-- Jira: `https://dhendeaditya510.atlassian.net`, project key `KAN`, issue type `Bug`
-- For a TestRail multi-suite project, define optional GitHub Actions variable `TESTRAIL_SUITE_ID`.
-
-Do not put API tokens in the README, source code, workflow YAML, public issue comments, or screenshots. The `.gitignore` excludes local `.env` credentials.
-
-## Run from GitHub Actions
-
-Open **Actions → Synthetic Test Generation → Run workflow**.
-
-| Action | Provider | Writes |
-| --- | --- | --- |
-| `preview` | `mock` (default) or `openai` | No TestRail/Jira changes |
-| `full-demo` | `mock` or `openai` | Reuse/create TestRail case, create a run, execute Playwright, send result |
-| `jira-demo` | `mock` recommended | Same as full-demo, but deliberately inject a failing assertion and create/reuse one clearly labeled synthetic Jira issue |
-
-**Start with `preview`, then `full-demo`. Select `jira-demo` only if you explicitly approve creating a synthetic Bug in project `KAN`.** A synthetic failure is not a real product defect. Delete or close demo issues after reviewing them.
-
-The workflow uses a concurrency group to avoid overlapping runs. It searches TestRail for existing requirement IDs on each live publish. The TestRail execution run is named using the GitHub run ID, allowing a distinct run per execution; local mapping files are not a durable database. The Jira issue search uses a persistent per-case label.
-
-## TestRail run retention: latest three
-
-Following each live `full-demo` or `jira-demo`, GitHub Actions uses **`TESTRAIL_RETENTION_SCOPE=project`** to retain the newest **three test runs in TestRail project `1`** by run ID. **All older runs in that project are permanently deleted, regardless of their names or which workflow created them.** TestRail test cases, Jira issues, and runs in other TestRail projects are not deleted.
-
-Cleanup is attempted after the execution even when the Playwright or Jira step fails. Before deleting each run, the workflow verifies the run belongs to project 1, sends TestRail's explicit deletion payload, and records successful deletions individually. If deletion fails partway through, the artifact records the IDs already removed and the failed run ID. It checks the current run is in the newest three before deleting older runs. Download any historical execution evidence first; this project provides no rollback for deleted TestRail runs.
-
-With the same environment variable, preview the exact run IDs that would be removed:
+**Prerequisites:** Python 3.12+, Node.js 22+, npm and Chromium for Playwright.
 
 ```bash
-TESTRAIL_RETENTION_SCOPE=project python3 -m test_generation.runner prune-runs
-```
+git clone https://github.com/aditya42/prompt-engineered-testgen.git
+cd prompt-engineered-testgen
 
-To apply the deletion explicitly outside GitHub Actions:
-
-```bash
-TESTRAIL_RETENTION_SCOPE=project python3 -m test_generation.runner prune-runs --apply
-```
-
-The default CLI scope without this environment variable is `managed` and deletes only older PromptTestGen-managed runs. The GitHub Actions workflow deliberately uses the broader `project` scope to enforce the requested maximum of three visible runs for project `1`.
-
-## GitHub Actions execution summary
-
-Every workflow produces a **Summary** section showing Playwright pass/fail counts, TestRail case and run links, the Jira issue key and link if created/reused, and the IDs of any deleted demo runs. The same report is stored as `state/summary.md` in the workflow artifact.
-
-## Run locally
-
-Requires Python 3.12+, Node.js 22+, and Playwright Chromium.
-
-```bash
 npm install
 npx playwright install chromium
 
-# Offline generation; writes local generated_tests/ and state/
-python3 -m test_generation.runner generate --provider mock
+# Generate from a deterministic fixture
+python -m test_generation.runner generate --provider mock
 
-# Execute the generated test against the synthetic app
+# Playwright automatically starts the local StreamBox sample app
 npx playwright test
+
+# Run mocked Python tests without external connections
+python -m unittest discover -s tests -v
 ```
 
-For a read-only account check, export the required environment variables locally and run:
+A successful local execution should produce one generated subscription test and a JSON report in `reports/`.
+
+## Run the connected demonstration in GitHub Actions
+
+Open [Synthetic Test Generation](https://github.com/aditya42/prompt-engineered-testgen/actions/workflows/test-generation.yml), select **Run workflow**, and choose:
+
+| Action | Provider | External side effects |
+| --- | --- | --- |
+| `preview` | `mock` or `openai` | No TestRail/Jira writes |
+| `full-demo` | `mock` or `openai` | Creates/reuses a TestRail case, executes Playwright, syncs a result |
+| `jira-demo` | `mock` recommended | Deliberately fails the test, syncs the failure and creates/reuses a synthetic Jira Bug |
+
+**Use `preview` first.** `jira-demo` intentionally creates a *real Jira record* clearly marked as a synthetic demonstration. It must not be presented as a production defect.
+
+The workflow provides a GitHub Actions execution summary with TestRail links, Playwright counts, any Jira issue key, and deleted TestRail run IDs.
+
+### Required GitHub secrets
+
+Configure secrets at **Settings → Secrets and variables → Actions**:
+
+| Secret | Purpose |
+| --- | --- |
+| `TESTRAIL_EMAIL` | TestRail username |
+| `TESTRAIL_API_KEY` | TestRail API key |
+| `JIRA_EMAIL` | Atlassian account username |
+| `JIRA_API_TOKEN` | Jira API token |
+| `OPENAI_API_KEY` | Only required when using the `openai` provider |
+
+The demonstration workflow is currently configured for TestRail project `1`, section `1`, and Jira project `KAN`. The optional `TESTRAIL_SUITE_ID` Actions variable supports multi-suite TestRail projects. See the [integration guide](docs/INTEGRATION_GUIDE.md) for operational details.
+
+## TestRail retention: important destructive behavior
+
+After any connected `full-demo` or `jira-demo` workflow, **only the newest three test runs in TestRail project `1` are retained**. The workflow permanently deletes every older run in that project, **including runs from other workflows**. It does not delete test cases, Jira issues or runs in other projects.
+
+To preview proposed deletions without changing TestRail (after configuring API environment variables):
 
 ```bash
-python3 -m test_generation.runner verify
+TESTRAIL_RETENTION_SCOPE=project python -m test_generation.runner prune-runs
 ```
 
-Live publishing, run creation and synchronization require explicit `--apply`:
+The standalone CLI defaults to a narrower `managed` retention scope; GitHub Actions explicitly sets `TESTRAIL_RETENTION_SCOPE=project`. Export historical results before executing the live workflow. Deletion is not reversible through this project.
 
-```bash
-python3 -m test_generation.runner publish --apply --provider mock
-python3 -m test_generation.runner create-run --apply
-npx playwright test
-python3 -m test_generation.runner sync --apply
-```
+## Verified integration evidence
 
-The local `--create-bugs` option is guarded by `DEMO_INJECT_FAILURE=true` and is intended for synthetic demonstrations only.
+| Demonstration | GitHub Actions evidence |
+| --- | --- |
+| Live OpenAI generation and passing Playwright execution | [Run 41034247358](https://github.com/aditya42/prompt-engineered-testgen/actions/runs/41034247358) |
+| Cross-run TestRail case reuse | [Run 41035590823](https://github.com/aditya42/prompt-engineered-testgen/actions/runs/41035590823) |
+| Intentional failure → TestRail → synthetic Jira Bug | [Run 41037773572](https://github.com/aditya42/prompt-engineered-testgen/actions/runs/41037773572) |
+| Three-run TestRail retention and execution summary | [Run 41039303473](https://github.com/aditya42/prompt-engineered-testgen/actions/runs/41039303473) |
 
-## How generated cases are evaluated
+These demonstrate the integrations for **one synthetic subscription scenario**. They are not a benchmark of AI-generated test quality, nor evidence of performance on a real production application. After the directory refactor, a new run is required to reconfirm CI compatibility.
 
-The current implementation validates **requirement ID coverage**, exact requirement intent, an **allowlisted step vocabulary**, and required opening/closing steps. These are deterministic quality gates, not a measured claim that prompt engineering improved productivity. For future benchmarking, compare prompt variants on human acceptance rate, valid generation rate, requirement coverage, runtime success, token usage, and elapsed test-authoring time with repeatable datasets.
+## Engineering principles
 
-## Operational constraints and next improvements
+The project favors **KISS, DRY, YAGNI, separation of concerns and no premature optimization**. It intentionally avoids a database, queue or agent framework for a one-scenario example. Python naming conventions and style are guided by [PEP 8](https://peps.python.org/pep-0008/).
 
-- The example has one synthetic subscription requirement, not a complete subscription/billing regression suite.
-- TestRail test case templates differ; custom field names and suite selection may require configuration.
-- Duplicate checking is based on exact requirement markers and case-specific Jira labels; it does not replace a transactional database or handle external concurrent modifications.
-- Jira failures in the automated test may originate from test code/environment; real incident creation should include triage, reruns, and severity assessment before deployment to production.
-- The explicit synthetic Jira demo is deliberately scoped to one case and must not be scheduled against production Jira.
-- Tests and the GitHub pipeline are not proof of broad LLM benchmarking or real-world release-quality improvements until independently measured.
-
-## Security
-
-Only HTTPS API endpoints are permitted by the Python client. API secrets are supplied from GitHub Actions Secrets or local environment variables. The runner reports HTTP status failures without dumping response bodies or authorization headers. Actions use read-only repository permissions; external writes are controlled separately by workflow inputs.
+For implementation details, see [architecture](docs/ARCHITECTURE.md). For contributions and local checks, see [CONTRIBUTING.md](CONTRIBUTING.md).
