@@ -38,11 +38,12 @@ TestRail run + pass/fail result
 - **Traceability:** `SUB-001` → TestRail `C<ID>` → Playwright title `[TR:C<ID>]` → TestRail run/result → optional Jira issue.
 - **Cross-run duplicate prevention:** on each live publish, the runner queries TestRail cases for the project and reconciles requirement markers such as `[SUB-001]`, rather than relying on ephemeral GitHub runner files.
 - **Controlled Jira creation:** only the manually selected `jira-demo` workflow action enables issue creation. It intentionally fails a synthetic test, labels the issue `synthetic-demo`, and searches existing Jira issues by a stable case-specific label before creating another one.
-- **CI evidence:** GitHub Actions uploads generated tests, result JSON, and case/run mappings as per-run artifacts.
+- **CI evidence:** GitHub Actions uploads generated tests and mappings, and adds an execution summary with clickable TestRail and Jira links.
+- **Three-run retention:** After live executions, older runs managed by this demo are permanently deleted, preserving its most recent three; unrelated TestRail runs and test cases are not deleted.
 
 ### Validated versus unvalidated functionality
 
-A previous live workflow generated one case using OpenAI, published **TestRail C1**, created **run R1**, executed Playwright successfully (1/1 passed), and synchronized the TestRail result. Read-only access to Jira project `KAN` was verified. **The new cross-run reconciliation and Jira issue-creation branches require a new workflow execution**; do not describe them as live-verified until those executions pass. Mock-provider runs are demonstrations, not measurements of LLM output quality.
+A previous live workflow generated one case using OpenAI, published **TestRail C1**, created **run R1**, executed Playwright successfully (1/1 passed), and synchronized the TestRail result. Read-only access to Jira project `KAN` was verified. Subsequent live workflows verified TestRail case reuse, Playwright failure synchronization, and Jira Bug create/reuse in [run 41037773572](https://github.com/aditya42/prompt-engineered-testgen/actions/runs/41037773572). **The newly added retention and Actions summary features require fresh CI validation.** Mock-provider runs are demonstrations, not measurements of LLM output quality.
 
 ## Repository layout
 
@@ -90,6 +91,30 @@ Open **Actions → Phase 2 - Controlled TestRail and Playwright Demo → Run wor
 **Start with `preview`, then `full-demo`. Select `jira-demo` only if you explicitly approve creating a synthetic Bug in project `KAN`.** A synthetic failure is not a real product defect. Delete or close demo issues after reviewing them.
 
 The workflow uses a concurrency group to avoid overlapping runs. It searches TestRail for existing requirement IDs on each live publish. The TestRail execution run is named using the GitHub run ID, allowing a distinct run per execution; local mapping files are not a durable database. The Jira issue search uses a persistent per-case label.
+
+## TestRail run retention: latest three
+
+After a live `full-demo` or `jira-demo` run, GitHub Actions automatically attempts to permanently delete old **PromptTestGen-managed TestRail test runs**, keeping the newest three by run ID. This includes the original `PromptTestGen phase 2 controlled demo` run. It does **not** delete TestRail test cases, Jira issues, or unrelated TestRail runs in the same project.
+
+This cleanup runs after result synchronization, including when a downstream step fails. The next execution will attempt to remove older existing demo runs too. **Deleted runs and their results cannot be restored by this project.** Export important execution history first.
+
+To inspect the proposed deletions without changing TestRail:
+
+```bash
+python3 -m phase2.runner prune-runs
+```
+
+To explicitly apply cleanup outside GitHub Actions:
+
+```bash
+python3 -m phase2.runner prune-runs --apply
+```
+
+**Scope:** The policy guarantees at most three runs *belonging to this demo* when cleanup succeeds. It deliberately preserves unrelated runs; therefore the total TestRail project run count may exceed three.
+
+## GitHub Actions execution summary
+
+Every workflow produces a **Summary** section showing Playwright pass/fail counts, TestRail case and run links, the Jira issue key and link if created/reused, and the IDs of any deleted demo runs. The same report is stored as `state/summary.md` in the workflow artifact.
 
 ## Run locally
 
