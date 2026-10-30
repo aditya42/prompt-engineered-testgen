@@ -42,7 +42,10 @@ class Phase2Tests(unittest.TestCase):
             calls.append((endpoint, method))
             if endpoint.startswith("get_runs/"):
                 return {"runs": records, "_links": {"next": None}}
+            if endpoint.startswith("get_run/"):
+                return {"id": int(endpoint.rsplit("/", 1)[-1]), "project_id": 1}
             if endpoint.startswith("delete_run/"):
+                self.assertEqual(body, {"soft": 0})
                 return {}
             raise AssertionError(endpoint)
         with patch.object(runner, "tr", side_effect=api):
@@ -60,7 +63,10 @@ class Phase2Tests(unittest.TestCase):
             calls.append((endpoint, method))
             if endpoint.startswith("get_runs/"):
                 return {"runs": runs, "_links": {"next": None}}
+            if endpoint.startswith("get_run/"):
+                return {"id": int(endpoint.rsplit("/", 1)[-1]), "project_id": 1}
             if endpoint.startswith("delete_run/"):
+                self.assertEqual(body, {"soft": 0})
                 return {}
             raise AssertionError(endpoint)
         with patch.dict(os.environ, {"TESTRAIL_RETENTION_SCOPE": "project"}), patch.object(runner, "tr", side_effect=fake_tr):
@@ -68,6 +74,41 @@ class Phase2Tests(unittest.TestCase):
         self.assertEqual(result["deleted"], [2, 1])
         self.assertEqual(result["preserved"], [3, 4, 5])
         self.assertIn(("delete_run/1", "POST"), calls)
+
+    def test_retention_records_partial_deletions_and_failed_run(self):
+        runner.save(self.state / "run.json", {"id": 5})
+        runs = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
+                for i in range(1, 6)]
+        def fake_tr(endpoint, method="GET", body=None):
+            if endpoint.startswith("get_runs/"):
+                return {"runs": runs, "_links": {"next": None}}
+            if endpoint.startswith("get_run/"):
+                return {"project_id": 1}
+            if endpoint == "delete_run/2":
+                return {}
+            if endpoint == "delete_run/1":
+                raise RuntimeError("POST request failed: HTTP 400")
+            raise AssertionError(endpoint)
+        with patch.dict(os.environ, {"TESTRAIL_RETENTION_SCOPE": "project"}), patch.object(runner, "tr", side_effect=fake_tr):
+            with self.assertRaisesRegex(RuntimeError, "R1"):
+                runner.prune_runs(True)
+        retention = runner.read(self.state / "retention.json", {})
+        self.assertEqual(retention["deleted"], [2])
+        self.assertEqual(retention["failed_run_id"], 1)
+
+    def test_retention_rejects_run_in_different_project(self):
+        runner.save(self.state / "run.json", {"id": 4})
+        runs = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
+                for i in range(1, 5)]
+        def fake_tr(endpoint, method="GET", body=None):
+            if endpoint.startswith("get_runs/"):
+                return {"runs": runs, "_links": {"next": None}}
+            if endpoint.startswith("get_run/"):
+                return {"project_id": 99}
+            raise AssertionError("Must not delete any run")
+        with patch.object(runner, "tr", side_effect=fake_tr):
+            with self.assertRaisesRegex(RuntimeError, "different project"):
+                runner.prune_runs(True)
 
     def test_retention_dry_run_never_deletes(self):
         runs = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
