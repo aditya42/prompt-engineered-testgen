@@ -223,8 +223,8 @@ def create_run(apply):
 
 def clean_error(message):
     """Remove ANSI escape sequences and non-printable characters from test diagnostics."""
-    message = re.sub(r"\\x1b\\[[0-?]*[ -/]*[@-~]", "", message)
-    return "".join(char for char in message if char.isprintable() or char in "\\n\\t")
+    message = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", message)
+    return "".join(char for char in message if char.isprintable() or char in "\n\t")
 
 def adf(message):
     return {"type": "doc", "version": 1, "content": [
