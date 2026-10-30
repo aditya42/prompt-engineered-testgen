@@ -45,6 +45,7 @@ jobs:
       JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DEMO_INJECT_FAILURE: ${{ inputs.action == 'jira-demo' }}
+      DEMO_ACTION: ${{ inputs.action }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -83,6 +84,17 @@ jobs:
       - name: Create or reconcile synthetic Jira issue
         if: inputs.action == 'jira-demo'
         run: python -m phase2.runner sync --apply --create-bugs
+      - name: Retain only the latest 3 PromptTestGen TestRail runs
+        if: ${{ always() && inputs.action != 'preview' }}
+        run: |
+          if [ -f state/run.json ]; then
+            python -m phase2.runner prune-runs --apply
+          else
+            echo "No new execution run to retain"
+          fi
+      - name: Publish GitHub Actions execution summary
+        if: ${{ always() }}
+        run: python -m phase2.runner summary
       - name: Upload generated cases and run mapping
         if: always()
         uses: actions/upload-artifact@v4
