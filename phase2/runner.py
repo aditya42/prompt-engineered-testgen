@@ -123,7 +123,7 @@ def existing_testrail_cases():
     found = {}
     offset = 0
     while True:
-        url = f"get_cases/{project}?limit=250&offset={offset}"
+        url = f"get_cases/{project}&limit=250&offset={offset}"
         if os.getenv("TESTRAIL_SUITE_ID"):
             url += "&suite_id=" + urllib.parse.quote(os.environ["TESTRAIL_SUITE_ID"])
         response = tr(url)
@@ -186,7 +186,7 @@ def create_run(apply):
         offset = 0
         existing = None
         while True:
-            response = tr(f"get_runs/{project}?limit=250&offset={offset}")
+            response = tr(f"get_runs/{project}&limit=250&offset={offset}")
             runs = response if isinstance(response, list) else response.get("runs", [])
             existing = next((r for r in runs if r.get("name") == name), None)
             if existing:
