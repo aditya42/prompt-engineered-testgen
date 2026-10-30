@@ -265,9 +265,25 @@ def prune_runs(apply=False, keep=3):
                "preserved": sorted(keep_ids),
                "delete": [int(r["id"]) for r in victims]}
     if apply:
+        deleted = []
         for r in victims:
-            tr("delete_run/" + str(int(r["id"])), "POST")
-        outcome["deleted"] = [int(r["id"]) for r in victims]
+            rid = int(r["id"])
+            try:
+                details = tr("get_run/" + str(rid))
+                if str(details.get("project_id")) != str(os.environ["TESTRAIL_PROJECT_ID"]):
+                    raise RuntimeError("Refusing to delete run in a different project")
+                # TestRail's delete_run supports a JSON 'soft' option. Send an
+                # explicit body so POST requests are handled consistently.
+                tr("delete_run/" + str(rid), "POST", {"soft": 0})
+                deleted.append(rid)
+                outcome["deleted"] = deleted
+                save(STATE / "retention.json", outcome)
+            except RuntimeError as exc:
+                outcome["deleted"] = deleted
+                outcome["failed_run_id"] = rid
+                save(STATE / "retention.json", outcome)
+                raise RuntimeError(f"TestRail retention failed for R{rid}: {exc}") from None
+        outcome["deleted"] = deleted
     save(STATE / "retention.json", outcome)
     print(json.dumps(outcome))
     return outcome
