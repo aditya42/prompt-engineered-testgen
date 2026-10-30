@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from phase2 import runner
+from test_generation import runner
 
 
 class Phase2Tests(unittest.TestCase):
@@ -26,7 +26,7 @@ class Phase2Tests(unittest.TestCase):
 
     def test_workflow_retention_and_summary_run_after_live_execution(self):
         workflow = (Path(__file__).resolve().parent.parent /
-                    ".github" / "workflows" / "phase2.yml").read_text()
+                    ".github" / "workflows" / "test-generation.yml").read_text()
         self.assertIn("python -m phase2.runner prune-runs --apply", workflow)
         self.assertIn("TESTRAIL_RETENTION_SCOPE: project", workflow)
         self.assertIn("python -m phase2.runner summary", workflow)
@@ -220,7 +220,7 @@ class Phase2Tests(unittest.TestCase):
             with patch.dict(os.environ, {"DEMO_INJECT_FAILURE": "true"}):
                 runner.playwright(runner.REQUIREMENTS, {"SUB-001": 1})
             self.assertIn("INTENTIONALLY WRONG - DEMO",
-                          (self.state / "generated" / "subscription.spec.ts").read_text())
+                          (self.state / "generated_tests" / "subscription.spec.ts").read_text())
 
     def test_jira_creation_rejected_outside_demo_mode(self):
         root = self.state

@@ -4,5 +4,9 @@ playwright-report/
 test-results/
 state/
 reports/
-generated/
+generated_tests/
 __pycache__/
+
+.venv/
+.ruff_cache/
+*.py[cod]

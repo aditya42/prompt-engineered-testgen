@@ -1,4 +1,4 @@
-"""Phase 2: controlled synthetic subscription test generation -> TestRail -> Playwright -> Jira."""
+"""Generate and synchronize synthetic tests using TestRail, Playwright and Jira."""
 import argparse
 import base64
 import json
@@ -110,7 +110,7 @@ def playwright(cases, mapping):
         for step in c["steps"]:
             lines.append("  " + commands[step])
         lines.append("});")
-    target = ROOT / "generated" / "subscription.spec.ts"
+    target = ROOT / "generated_tests" / "subscription.spec.ts"
     target.parent.mkdir(exist_ok=True)
     target.write_text("\n".join(lines) + "\n")
 

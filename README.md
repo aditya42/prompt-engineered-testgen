@@ -49,14 +49,14 @@ A previous live workflow generated one case using OpenAI, published **TestRail C
 
 | Path | Purpose |
 | --- | --- |
-| `phase2/runner.py` | JSON-validated generation, TestRail case/run publishing, Playwright compilation, result sync, Jira demo |
-| `demo/index.html` | Fictional subscription UI |
-| `demo/server.cjs` | Local web server |
+| `test_generation/runner.py` | JSON-validated generation, TestRail case/run publishing, Playwright compilation, result sync, Jira demo |
+| `sample_app/index.html` | Fictional subscription UI |
+| `sample_app/server.cjs` | Local web server |
 | `playwright.config.ts` | Playwright config, JSON results, and local demo web server |
 | `.github/workflows/verify-integrations.yml` | Read-only API authentication and project access checks |
-| `.github/workflows/phase2.yml` | Manual preview, live case execution, or synthetic Jira defect demo |
-| `PHASE2.md` | Additional integration notes |
-| `state/`, `generated/`, `reports/` | Runtime artifacts (excluded from Git) |
+| `.github/workflows/test-generation.yml` | Manual preview, live case execution, or synthetic Jira defect demo |
+| `docs/INTEGRATION_GUIDE.md` | Additional integration notes |
+| `state/`, `generated_tests/`, `reports/` | Runtime artifacts (excluded from Git) |
 
 ## Configure GitHub Actions
 
@@ -80,7 +80,7 @@ Do not put API tokens in the README, source code, workflow YAML, public issue co
 
 ## Run from GitHub Actions
 
-Open **Actions → Phase 2 - Controlled TestRail and Playwright Demo → Run workflow**.
+Open **Actions → Synthetic Test Generation → Run workflow**.
 
 | Action | Provider | Writes |
 | --- | --- | --- |
@@ -101,13 +101,13 @@ Cleanup is attempted after the execution even when the Playwright or Jira step f
 With the same environment variable, preview the exact run IDs that would be removed:
 
 ```bash
-TESTRAIL_RETENTION_SCOPE=project python3 -m phase2.runner prune-runs
+TESTRAIL_RETENTION_SCOPE=project python3 -m test_generation.runner prune-runs
 ```
 
 To apply the deletion explicitly outside GitHub Actions:
 
 ```bash
-TESTRAIL_RETENTION_SCOPE=project python3 -m phase2.runner prune-runs --apply
+TESTRAIL_RETENTION_SCOPE=project python3 -m test_generation.runner prune-runs --apply
 ```
 
 The default CLI scope without this environment variable is `managed` and deletes only older PromptTestGen-managed runs. The GitHub Actions workflow deliberately uses the broader `project` scope to enforce the requested maximum of three visible runs for project `1`.
@@ -124,8 +124,8 @@ Requires Python 3.12+, Node.js 22+, and Playwright Chromium.
 npm install
 npx playwright install chromium
 
-# Offline generation; writes local generated/ and state/
-python3 -m phase2.runner generate --provider mock
+# Offline generation; writes local generated_tests/ and state/
+python3 -m test_generation.runner generate --provider mock
 
 # Execute the generated test against the synthetic app
 npx playwright test
@@ -134,16 +134,16 @@ npx playwright test
 For a read-only account check, export the required environment variables locally and run:
 
 ```bash
-python3 -m phase2.runner verify
+python3 -m test_generation.runner verify
 ```
 
 Live publishing, run creation and synchronization require explicit `--apply`:
 
 ```bash
-python3 -m phase2.runner publish --apply --provider mock
-python3 -m phase2.runner create-run --apply
+python3 -m test_generation.runner publish --apply --provider mock
+python3 -m test_generation.runner create-run --apply
 npx playwright test
-python3 -m phase2.runner sync --apply
+python3 -m test_generation.runner sync --apply
 ```
 
 The local `--create-bugs` option is guarded by `DEMO_INJECT_FAILURE=true` and is intended for synthetic demonstrations only.

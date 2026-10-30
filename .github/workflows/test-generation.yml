@@ -1,4 +1,4 @@
-name: Phase 2 - Controlled TestRail and Playwright Demo
+name: Synthetic Test Generation — TestRail, Playwright and Jira
 
 on:
   workflow_dispatch:
@@ -58,18 +58,18 @@ jobs:
       - name: Unit tests (offline, mocked APIs)
         run: python -m unittest discover -s tests -v
       - name: Verify TestRail and Jira read access
-        run: python -m phase2.runner verify
+        run: python -m test_generation.runner verify
       - name: Verify Jira Bug issue type before creating demo records
         if: inputs.action == 'jira-demo'
-        run: python -m phase2.runner verify-jira-bug
+        run: python -m test_generation.runner verify-jira-bug
       - name: Generate and preview case (no writes)
         if: inputs.action == 'preview'
-        run: python -m phase2.runner publish --provider ${{ inputs.provider }}
+        run: python -m test_generation.runner publish --provider ${{ inputs.provider }}
       - name: Publish one case and create TestRail run
         if: inputs.action != 'preview'
         run: |
-          python -m phase2.runner publish --apply --provider ${{ inputs.provider }}
-          python -m phase2.runner create-run --apply
+          python -m test_generation.runner publish --apply --provider ${{ inputs.provider }}
+          python -m test_generation.runner create-run --apply
       - name: Install browser dependencies
         if: inputs.action != 'preview'
         run: |
@@ -81,28 +81,28 @@ jobs:
         run: npx playwright test
       - name: Synchronize TestRail results
         if: inputs.action != 'preview'
-        run: python -m phase2.runner sync --apply
+        run: python -m test_generation.runner sync --apply
       - name: Create or reconcile synthetic Jira issue
         if: inputs.action == 'jira-demo'
-        run: python -m phase2.runner sync --apply --create-bugs
+        run: python -m test_generation.runner sync --apply --create-bugs
       - name: Retain only the latest 3 TestRail runs in project 1
         if: ${{ always() && inputs.action != 'preview' }}
         run: |
           if [ -f state/run.json ]; then
-            python -m phase2.runner prune-runs --apply
+            python -m test_generation.runner prune-runs --apply
           else
             echo "No new execution run to retain"
           fi
       - name: Publish GitHub Actions execution summary
         if: ${{ always() }}
-        run: python -m phase2.runner summary
+        run: python -m test_generation.runner summary
       - name: Upload generated cases and run mapping
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: phase2-results-${{ github.run_id }}
+          name: test-generation-results-${{ github.run_id }}
           path: |
             state/
             reports/
-            generated/
+            generated_tests/
           if-no-files-found: ignore
