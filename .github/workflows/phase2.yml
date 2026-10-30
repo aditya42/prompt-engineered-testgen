@@ -1,0 +1,85 @@
+name: Phase 2 - Controlled TestRail and Playwright Demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Read-only preview or controlled one-case live demo"
+        type: choice
+        required: true
+        default: preview
+        options:
+          - preview
+          - full-demo
+      provider:
+        description: "Mock fixture or real OpenAI generation"
+        type: choice
+        required: true
+        default: mock
+        options:
+          - mock
+          - openai
+
+permissions:
+  contents: read
+
+concurrency:
+  group: controlled-testrail-demo
+  cancel-in-progress: false
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TESTRAIL_URL: https://testrailspersonal.testrail.io
+      TESTRAIL_PROJECT_ID: "1"
+      TESTRAIL_SECTION_ID: "1"
+      TESTRAIL_SUITE_ID: ${{ vars.TESTRAIL_SUITE_ID }}
+      TESTRAIL_EMAIL: ${{ secrets.TESTRAIL_EMAIL }}
+      TESTRAIL_API_KEY: ${{ secrets.TESTRAIL_API_KEY }}
+      JIRA_URL: https://dhendeaditya510.atlassian.net
+      JIRA_PROJECT_KEY: KAN
+      JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify TestRail and Jira read access
+        run: python -m phase2.runner verify
+      - name: Generate and preview case (no writes)
+        if: inputs.action == 'preview'
+        run: python -m phase2.runner publish --provider ${{ inputs.provider }}
+      - name: Publish one case and create TestRail run
+        if: inputs.action == 'full-demo'
+        run: |
+          python -m phase2.runner publish --apply --provider ${{ inputs.provider }}
+          python -m phase2.runner create-run --apply
+      - name: Install browser dependencies
+        if: inputs.action == 'full-demo'
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+      - name: Run generated Playwright test
+        if: inputs.action == 'full-demo'
+        continue-on-error: true
+        run: npx playwright test
+      - name: Synchronize TestRail results
+        if: inputs.action == 'full-demo'
+        run: python -m phase2.runner sync --apply
+      - name: Upload generated cases and run mapping
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-results-${{ github.run_id }}
+          path: |
+            state/
+            reports/
+            generated/
+          if-no-files-found: ignore
