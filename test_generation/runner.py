@@ -10,14 +10,13 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from test_generation import login
+
 ROOT = Path(__file__).resolve().parent.parent
 STATE = ROOT / "state"
 STATE.mkdir(exist_ok=True)
-REQUIREMENTS = [
-    {"id": "SUB-001", "title": "Customer can purchase a basic subscription with a valid email",
-     "intent": "successful_subscription", "steps": ["open_app", "enter_email", "subscribe", "assert_active"]},
-]
-ALLOWED = {"open_app", "enter_email", "subscribe", "assert_active"}
+REQUIREMENTS = login.REQUIREMENTS
+ALLOWED = set(login.ACTIONS)
 
 def api(url, email, secret, method="GET", body=None, bearer=False):
     if not url.startswith("https://"):
@@ -64,55 +63,51 @@ def save(path, data):
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 def generate(provider):
-    cases = REQUIREMENTS
-    if provider == "openai":
+    """Ask OpenAI for login test cases, then validate before compilation."""
+    if provider == "mock":
+        cases = login.mock_cases()
+    else:
         key = os.getenv("OPENAI_API_KEY")
         if not key:
-            raise RuntimeError("OPENAI_API_KEY is required for live LLM generation")
-        prompt = ("Generate strictly valid JSON object with key cases containing one test case per "
-                  "requirement, exactly the fields id,title,intent,steps. "
-                  "Preserve IDs and intents. Steps MUST be chosen from this allowlist: "
-                  + ", ".join(sorted(ALLOWED)) + ". Every test begins with open_app "
-                  "and ends with assert_active. Return no other content.")
-        body = {"model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-                "response_format": {"type": "json_object"},
-                "messages": [{"role": "system", "content": prompt},
-                             {"role": "user", "content": json.dumps({"requirements": REQUIREMENTS})}]}
-        response = api("https://api.openai.com/v1/chat/completions", "", key, "POST", body, bearer=True)
+            raise RuntimeError("OPENAI_API_KEY is required for live generation")
+        prompt = (
+            "You are an experienced QA engineer generating login test cases "
+            "for https://www.saucedemo.com/. Return a JSON object with a cases "
+            "array, exactly one test case for each supplied requirement. "
+            "For each case return id, intent, title, steps. Produce clear, "
+            "distinctive test titles. Preserve each requirement id and intent. "
+            "Use only the exact safe steps specified for each requirement; "
+            "do not invent executable actions or extra scenarios. "
+            "Cover valid credentials, invalid password, locked account, "
+            "missing username and missing password. Return JSON only."
+        )
+        body = {
+            "model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": json.dumps({
+                    "requirements": REQUIREMENTS,
+                    "allowed_actions": sorted(ALLOWED),
+                })},
+            ],
+        }
+        response = api(
+            "https://api.openai.com/v1/chat/completions",
+            "", key, "POST", body, bearer=True,
+        )
         cases = json.loads(response["choices"][0]["message"]["content"])["cases"]
-    expected_ids = {r["id"] for r in REQUIREMENTS}
-    if len(cases) != len(REQUIREMENTS) or {c.get("id") for c in cases} != expected_ids:
-        raise RuntimeError("Generated test requirement coverage is incomplete")
-    for c in cases:
-        reference = next(r for r in REQUIREMENTS if r["id"] == c["id"])
-        steps = c.get("steps")
-        if (c.get("intent") != reference["intent"] or not isinstance(c.get("title"), str)
-            or not isinstance(steps, list) or not steps
-            or steps[0] != "open_app" or steps[-1] != "assert_active"
-            or not all(isinstance(s, str) and s in ALLOWED for s in steps)):
-            raise RuntimeError("Generated case failed validation")
+    cases = login.validate_cases(cases)
     save(STATE / "plan.json", {"cases": cases, "provider": provider})
-    print(json.dumps({"provider": provider, "generated": len(cases), "requirements_covered": len(expected_ids)}))
+    print(json.dumps({"provider": provider, "generated": len(cases),
+                      "requirements_covered": len(REQUIREMENTS)}))
     return cases
 
+
 def playwright(cases, mapping):
-    lines = ["import { test, expect } from '@playwright/test';"]
-    commands = {"open_app": "await page.goto('/');",
-                "enter_email": "await page.locator('#email').fill('demo@example.com');",
-                "subscribe": "await page.locator('#subscribe').click();",
-                "assert_active": "await expect(page.locator('#status')).toHaveText('Subscription active');"}
-    if os.getenv("DEMO_INJECT_FAILURE") == "true":
-        commands["assert_active"] = "await expect(page.locator('#status')).toHaveText('INTENTIONALLY WRONG - DEMO');"
-    for c in cases:
-        cid = mapping.get(c["id"])
-        marker = f"[TR:C{cid}] " if cid else ""
-        lines.append(f"test({json.dumps(marker + '[' + c['id'] + '] ' + c['title'])}, async ({{ page }}) => {{")
-        for step in c["steps"]:
-            lines.append("  " + commands[step])
-        lines.append("});")
-    target = ROOT / "generated_tests" / "subscription.spec.ts"
-    target.parent.mkdir(exist_ok=True)
-    target.write_text("\n".join(lines) + "\n")
+    """Compile the login cases using the bounded Playwright action catalog."""
+    login.compile_playwright(cases, mapping, ROOT)
+
 
 def verify():
     project = os.environ["TESTRAIL_PROJECT_ID"]
@@ -161,7 +156,9 @@ def existing_testrail_cases():
 
 def publish(apply, provider):
     cases = generate(provider)
-    mapping = existing_testrail_cases() if apply else read(STATE / "case-map.json", {})
+    available = existing_testrail_cases() if apply else read(STATE / "case-map.json", {})
+    mapping = {case["id"]: available[case["id"]] for case in cases
+               if case["id"] in available}
     for c in cases:
         if c["id"] in mapping:
             continue
@@ -169,9 +166,9 @@ def publish(apply, provider):
             # Simple text fields; TestRail instances may require template-specific custom fields.
             result = tr("add_case/" + os.environ["TESTRAIL_SECTION_ID"], "POST", {
                 "title": "[" + c["id"] + "] " + c["title"],
-                "custom_preconds": "Synthetic demo requirement " + c["id"],
-                "custom_steps": "1. Open sample application\n2. Enter valid email\n3. Subscribe",
-                "custom_expected": "Subscription active"})
+                "custom_preconds": "Public SauceDemo login page",
+                "custom_steps": "\n".join(c["steps"]),
+                "custom_expected": c["intent"]})
             mapping[c["id"]] = int(result["id"])
             save(STATE / "case-map.json", mapping)
     save(STATE / "case-map.json", mapping)
@@ -187,7 +184,7 @@ def create_run(apply):
     if previous.get("id"):
         print(json.dumps({"run_id": previous["id"], "reused": True}))
         return
-    name = "PromptTestGen phase 2 run " + os.getenv("GITHUB_RUN_ID", "local")
+    name = "SauceDemo login run " + os.getenv("GITHUB_RUN_ID", "local")
     payload = {"name": name, "include_all": False,
                "case_ids": sorted(set(mapping.values()))}
     if os.getenv("TESTRAIL_SUITE_ID"):
@@ -221,7 +218,7 @@ def create_run(apply):
     else:
         print(json.dumps({"dry_run": True, "would_create": payload}))
 
-RUN_PREFIX = "PromptTestGen phase 2 "
+RUN_PREFIX = "SauceDemo login run "
 LEGACY_RUN_NAME = "PromptTestGen phase 2 controlled demo"
 
 def project_runs():
