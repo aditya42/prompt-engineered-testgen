@@ -57,6 +57,9 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Verify TestRail and Jira read access
         run: python -m phase2.runner verify
+      - name: Verify Jira Bug issue type before creating demo records
+        if: inputs.action == 'jira-demo'
+        run: python -m phase2.runner verify-jira-bug
       - name: Generate and preview case (no writes)
         if: inputs.action == 'preview'
         run: python -m phase2.runner publish --provider ${{ inputs.provider }}
