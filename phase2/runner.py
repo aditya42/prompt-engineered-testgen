@@ -114,9 +114,40 @@ def verify():
         raise RuntimeError("Jira user or project mismatch")
     print("PASS: read-only TestRail and Jira access")
 
+def existing_testrail_cases():
+    """Find existing cases by stable requirement marker across workflow runs."""
+    project = os.environ["TESTRAIL_PROJECT_ID"]
+    section = os.environ["TESTRAIL_SECTION_ID"]
+    found = {}
+    offset = 0
+    while True:
+        url = f"get_cases/{project}?limit=250&offset={offset}"
+        if os.getenv("TESTRAIL_SUITE_ID"):
+            url += "&suite_id=" + urllib.parse.quote(os.environ["TESTRAIL_SUITE_ID"])
+        response = tr(url)
+        cases = response if isinstance(response, list) else response.get("cases", [])
+        if not isinstance(cases, list):
+            raise RuntimeError("Unexpected TestRail case list response")
+        for item in cases:
+            if str(item.get("section_id")) != section:
+                continue
+            match = re.match(r"^\[([A-Z]+-\d+)\] ", item.get("title", ""))
+            if match:
+                requirement = match.group(1)
+                if requirement in found and found[requirement] != int(item["id"]):
+                    raise RuntimeError("Duplicate TestRail cases exist for " + requirement)
+                found[requirement] = int(item["id"])
+        next_link = response.get("_links", {}).get("next") if isinstance(response, dict) else None
+        if not next_link:
+            break
+        offset += len(cases)
+        if not cases or offset > 10000:
+            raise RuntimeError("TestRail pagination exceeded safety limit")
+    return found
+
 def publish(apply, provider):
     cases = generate(provider)
-    mapping = read(STATE / "case-map.json", {})
+    mapping = existing_testrail_cases() if apply else read(STATE / "case-map.json", {})
     for c in cases:
         if c["id"] in mapping:
             continue
@@ -129,6 +160,7 @@ def publish(apply, provider):
                 "custom_expected": "Subscription active"})
             mapping[c["id"]] = int(result["id"])
             save(STATE / "case-map.json", mapping)
+    save(STATE / "case-map.json", mapping)
     playwright(cases, mapping)
     print(json.dumps({"dry_run": not apply, "published_mapping": mapping,
                       "would_publish": [c["id"] for c in cases if c["id"] not in mapping]}))
@@ -141,7 +173,7 @@ def create_run(apply):
     if previous.get("id"):
         print(json.dumps({"run_id": previous["id"], "reused": True}))
         return
-    payload = {"name": "PromptTestGen phase 2 controlled demo", "include_all": False,
+    payload = {"name": "PromptTestGen phase 2 run " + os.getenv("GITHUB_RUN_ID", "local"), "include_all": False,
                "case_ids": sorted(set(mapping.values()))}
     if os.getenv("TESTRAIL_SUITE_ID"):
         payload["suite_id"] = int(os.environ["TESTRAIL_SUITE_ID"])
@@ -187,20 +219,24 @@ def sync(apply, create_bugs):
     if not results:
         raise RuntimeError("No TestRail-linked tests in Playwright JSON results")
     ledger = read(STATE / "ledger.json", {})
+    demo_failure = os.getenv("DEMO_INJECT_FAILURE") == "true"
+    if create_bugs and not demo_failure:
+        raise RuntimeError("Jira writes require the explicit synthetic demonstration mode")
     for cid, failed, message, title in results:
         fingerprint = f"{run_id}:{cid}:{'failed' if failed else 'passed'}"
-        if fingerprint in ledger:
+        if fingerprint in ledger and (not failed or not create_bugs or ledger[fingerprint].get("jira_key")):
             continue
         if not apply:
             print(json.dumps({"case_id": cid, "failed": failed, "would_create_jira_bug": failed and create_bugs}))
             continue
-        response = tr(f"add_result_for_case/{run_id}/{cid}", "POST",
-                      {"status_id": 5 if failed else 1,
-                       "comment": ("Playwright regression\n" + message)[:2500]})
-        ledger[fingerprint] = {"result_id": response.get("id")}
-        save(STATE / "ledger.json", ledger)
+        if fingerprint not in ledger:
+            response = tr(f"add_result_for_case/{run_id}/{cid}", "POST",
+                          {"status_id": 5 if failed else 1,
+                           "comment": ("Synthetic demo\n" + message)[:2500]})
+            ledger[fingerprint] = {"result_id": response.get("id")}
+            save(STATE / "ledger.json", ledger)
         if failed and create_bugs:
-            label = f"autotest-tr-c{cid}"
+            label = f"demo-autotest-tr-c{cid}"
             key = os.environ["JIRA_PROJECT_KEY"]
             q = urllib.parse.urlencode({"jql": f'project = "{key}" AND labels = "{label}"',
                                         "maxResults": 1, "fields": "key"})
@@ -209,10 +245,10 @@ def sync(apply, create_bugs):
                 bug_key = existing[0]["key"]
             else:
                 body = {"fields": {"project": {"key": key}, "issuetype": {"name": "Bug"},
-                       "summary": f"[Automation] TestRail C{cid} - failure"[:240],
-                       "description": adf("Playwright failure\nTestRail run: " + str(run_id) +
+                       "summary": f"[SYNTHETIC DEMO] TestRail C{cid} intentionally failed"[:240],
+                       "description": adf("SYNTHETIC DEMONSTRATION - NOT A PRODUCTION DEFECT\nTestRail run: " + str(run_id) +
                                           "\nTest: " + title + "\nEvidence: " + message),
-                       "labels": ["automated-qa", label]}}
+                       "labels": ["automated-qa", "synthetic-demo", label]}}
                 bug_key = jira("issue", "POST", body)["key"]
             ledger[fingerprint]["jira_key"] = bug_key
             save(STATE / "ledger.json", ledger)
