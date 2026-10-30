@@ -27,7 +27,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
   playwright-smoke:
-    name: Generate and execute synthetic Playwright test
+    name: Generate and execute SauceDemo login tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
           python-version: '3.12'
       - run: npm install
       - run: npx playwright install --with-deps chromium
-      - name: Generate synthetic test
+      - name: Generate login test cases
         run: python -m test_generation.runner generate --provider mock
       - name: Run Playwright smoke test
         run: npx playwright test
