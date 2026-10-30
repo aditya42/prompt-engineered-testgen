@@ -13,3 +13,7 @@ All workflow actions are manual. Secrets stay in GitHub Actions. Tests under `te
 **Important:** The new remote deduplication and Jira negative path still require first live validation; don't repeatedly run `jira-demo` until the first controlled result has been inspected. Cross-run deduplication is best-effort based on TestRail case titles and Jira labels, not a transactional guarantee. The `jira-demo` action writes a real synthetic Bug to the configured Jira project. Close/remove it after demonstration.
 
 For the full setup and architecture, see [README.md](README.md).
+
+## Execution evidence and retention
+
+New live workflow runs publish a GitHub Actions **Summary** with linked TestRail case/run IDs, any Jira issue key and URL, Playwright counts, and retained/deleted TestRail run IDs. The workflow automatically retains only the latest three **PromptTestGen-owned** TestRail runs, permanently deleting older demo runs after execution. Other TestRail project runs, test cases, and Jira issues are not deleted. Use `python -m phase2.runner prune-runs` to preview deletions; `--apply` performs them. This new retention behavior requires validation by a fresh Actions run.
