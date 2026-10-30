@@ -89,6 +89,8 @@ def playwright(cases, mapping):
                 "enter_email": "await page.locator('#email').fill('demo@example.com');",
                 "subscribe": "await page.locator('#subscribe').click();",
                 "assert_active": "await expect(page.locator('#status')).toHaveText('Subscription active');"}
+    if os.getenv("DEMO_INJECT_FAILURE") == "true":
+        commands["assert_active"] = "await expect(page.locator('#status')).toHaveText('INTENTIONALLY WRONG - DEMO');"
     for c in cases:
         cid = mapping.get(c["id"])
         marker = f"[TR:C{cid}] " if cid else ""
