@@ -308,7 +308,7 @@ def execution_summary():
              f"- GitHub action: {os.getenv('DEMO_ACTION', 'local')}",
              f"- Generation provider: {read(STATE / 'plan.json', {}).get('provider', 'n/a')}",
              f"- Playwright: **{passed} passed / {failed} failed**",
-             f"- Retention: last **3** TestRail project runs; deleted: "
+             "- Retention: last **3** TestRail project runs; deleted: "
              + (", ".join("R" + str(n) for n in retention.get("deleted", [])) or "none"),
              "", "| Resource | Link |", "| --- | --- |"]
     for req, cid in sorted(case_map.items()):
