@@ -23,6 +23,13 @@ class Phase2Tests(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
 
+    def test_workflow_retention_and_summary_run_after_live_execution(self):
+        workflow = (Path(__file__).resolve().parent.parent /
+                    ".github" / "workflows" / "phase2.yml").read_text()
+        self.assertIn("python -m phase2.runner prune-runs --apply", workflow)
+        self.assertIn("python -m phase2.runner summary", workflow)
+        self.assertIn("if: ${{ always() && inputs.action != 'preview' }}", workflow)
+
     def test_retention_keeps_three_and_never_deletes_unrelated(self):
         records = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
                    for i in range(1, 7)]
@@ -67,7 +74,8 @@ class Phase2Tests(unittest.TestCase):
         runner.save(self.state / "plan.json", {"provider": "mock"})
         with patch.object(runner, "ROOT", self.state), patch.dict(os.environ, {
             "TESTRAIL_URL": "https://example.testrail.io",
-            "JIRA_URL": "https://example.atlassian.net"
+            "JIRA_URL": "https://example.atlassian.net",
+            "GITHUB_STEP_SUMMARY": ""
         }):
             summary = runner.execution_summary()
         self.assertIn("runs/view/6", summary)
