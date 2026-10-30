@@ -221,6 +221,105 @@ def create_run(apply):
     else:
         print(json.dumps({"dry_run": True, "would_create": payload}))
 
+RUN_PREFIX = "PromptTestGen phase 2 "
+LEGACY_RUN_NAME = "PromptTestGen phase 2 controlled demo"
+
+def project_runs():
+    """Return all project runs; page fully before making retention decisions."""
+    project = os.environ["TESTRAIL_PROJECT_ID"]
+    runs = []
+    offset = 0
+    while True:
+        response = tr(f"get_runs/{project}&limit=250&offset={offset}")
+        batch = response if isinstance(response, list) else response.get("runs", [])
+        if not isinstance(batch, list):
+            raise RuntimeError("Unexpected TestRail runs response")
+        runs.extend(batch)
+        link = response.get("_links", {}).get("next") if isinstance(response, dict) else None
+        if not link:
+            break
+        if not batch:
+            raise RuntimeError("TestRail returned an empty pagination page")
+        offset += len(batch)
+        if offset > 10000:
+            raise RuntimeError("TestRail run pagination exceeded safety limit")
+    return runs
+
+def prune_runs(apply=False, keep=3):
+    """Keep newest N runs managed by this demo; never delete unrelated project runs."""
+    if keep < 1:
+        raise RuntimeError("Retention must preserve at least one run")
+    active_id = read(STATE / "run.json", {}).get("id")
+    managed = [r for r in project_runs()
+               if str(r.get("name", "")).startswith(RUN_PREFIX)]
+    managed.sort(key=lambda r: int(r["id"]), reverse=True)
+    keep_ids = {int(r["id"]) for r in managed[:keep]}
+    if active_id is not None:
+        keep_ids.add(int(active_id))
+    # Refuse an unsafe cleanup that would delete a current execution run.
+    victims = [r for r in managed if int(r["id"]) not in keep_ids]
+    outcome = {"dry_run": not apply, "keep": keep,
+               "preserved": sorted(keep_ids),
+               "delete": [int(r["id"]) for r in victims]}
+    if apply:
+        for r in victims:
+            tr("delete_run/" + str(int(r["id"])), "POST")
+        outcome["deleted"] = [int(r["id"]) for r in victims]
+    save(STATE / "retention.json", outcome)
+    print(json.dumps(outcome))
+    return outcome
+
+def execution_summary():
+    """Publish GitHub Actions run summary and stable result metadata."""
+    run = read(STATE / "run.json", {})
+    case_map = read(STATE / "case-map.json", {})
+    ledger = read(STATE / "ledger.json", {})
+    retention = read(STATE / "retention.json", {})
+    report = read(ROOT / "reports" / "playwright-results.json", {})
+    run_id = run.get("id")
+    tr_url = os.getenv("TESTRAIL_URL", "").rstrip("/")
+    jira_url = os.getenv("JIRA_URL", "").rstrip("/")
+    entries = [v for v in ledger.values() if isinstance(v, dict)]
+    jira_keys = sorted({v["jira_key"] for v in entries if v.get("jira_key")})
+    failed = sum(1 for s in report.get("suites", []) for sp in walk_specs(s)
+                 for t in sp.get("tests", []) if t.get("status") == "unexpected")
+    passed = sum(1 for s in report.get("suites", []) for sp in walk_specs(s)
+                 for t in sp.get("tests", []) if t.get("status") == "expected")
+    lines = ["## PromptTestGen — execution report", "",
+             f"- GitHub action: {os.getenv('DEMO_ACTION', 'local')}",
+             f"- Generation provider: {read(STATE / 'plan.json', {}).get('provider', 'n/a')}",
+             f"- Playwright: **{passed} passed / {failed} failed**",
+             f"- Retention: last **3** managed TestRail runs; deleted: "
+             + (", ".join("R" + str(n) for n in retention.get("deleted", [])) or "none"),
+             "", "| Resource | Link |", "| --- | --- |"]
+    for req, cid in sorted(case_map.items()):
+        lines.append(f"| TestRail case {req} | [C{cid}]({tr_url}/index.php?/cases/view/{cid}) |")
+    if run_id:
+        lines.append(f"| TestRail execution | [R{run_id}]({tr_url}/index.php?/runs/view/{run_id}) |")
+    for key in jira_keys:
+        if re.fullmatch(r"[A-Z][A-Z0-9_]*-[0-9]+", key):
+            lines.append(f"| Synthetic Jira Bug | [{key}]({jira_url}/browse/{key}) |")
+    if not jira_keys:
+        lines.append("| Jira Bug | Not created/reused in this execution |")
+    text = "\n".join(lines) + "\n"
+    target = STATE / "summary.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    step_summary = os.getenv("GITHUB_STEP_SUMMARY")
+    if step_summary:
+        with open(step_summary, "a", encoding="utf-8") as out:
+            out.write(text)
+    print(json.dumps({"run_id": run_id, "cases": case_map, "jira_keys": jira_keys,
+                      "passed": passed, "failed": failed,
+                      "deleted_runs": retention.get("deleted", [])}))
+    return text
+
+def walk_specs(suite):
+    for spec in suite.get("specs", []):
+        yield spec
+    for child in suite.get("suites", []):
+        yield from walk_specs(child)
+
 def clean_error(message):
     """Remove ANSI escape sequences and non-printable characters from test diagnostics."""
     message = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", message)
@@ -313,7 +412,7 @@ def sync(apply, create_bugs):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("command", choices=["verify", "verify-jira-bug", "generate", "publish", "create-run", "sync"])
+    p.add_argument("command", choices=["verify", "verify-jira-bug", "generate", "publish", "create-run", "sync", "prune-runs", "summary"])
     p.add_argument("--apply", action="store_true")
     p.add_argument("--create-bugs", action="store_true")
     p.add_argument("--provider", choices=["mock", "openai"], default="mock")
@@ -330,8 +429,12 @@ def main():
             publish(args.apply, args.provider)
         elif args.command == "create-run":
             create_run(args.apply)
-        else:
+        elif args.command == "sync":
             sync(args.apply, args.create_bugs)
+        elif args.command == "prune-runs":
+            prune_runs(args.apply)
+        else:
+            execution_summary()
     except (RuntimeError, KeyError, ValueError, urllib.error.URLError) as exc:
         print(f"Integration failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         raise SystemExit(1)
