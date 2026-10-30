@@ -18,7 +18,8 @@ class Phase2Tests(unittest.TestCase):
         self.addCleanup(self.patch_state.stop)
         self.env = patch.dict(os.environ, {
             "TESTRAIL_PROJECT_ID": "1", "TESTRAIL_SECTION_ID": "1",
-            "JIRA_PROJECT_KEY": "KAN", "GITHUB_RUN_ID": "test123"
+            "JIRA_PROJECT_KEY": "KAN", "GITHUB_RUN_ID": "test123",
+            "TESTRAIL_RETENTION_SCOPE": "managed"
         })
         self.env.start()
         self.addCleanup(self.env.stop)
