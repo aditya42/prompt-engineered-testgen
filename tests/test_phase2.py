@@ -23,6 +23,14 @@ class Phase2Tests(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
 
+    def test_jira_demo_executes_browser_and_result_sync(self):
+        workflow = (Path(__file__).resolve().parent.parent /
+                    ".github" / "workflows" / "phase2.yml").read_text()
+        for step in ("Install browser dependencies", "Run generated Playwright test",
+                     "Synchronize TestRail results"):
+            block = workflow.split("- name: " + step + "\n", 1)[1].split("\n      - name:", 1)[0]
+            self.assertIn("if: inputs.action != 'preview'", block)
+
     def test_testrail_pagination_uses_ampersand(self):
         calls = []
         def fake_tr(endpoint):
