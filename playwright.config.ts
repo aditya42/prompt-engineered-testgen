@@ -3,14 +3,14 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './generated_tests',
   testMatch: '**/*.spec.ts',
-  use: { baseURL: 'http://127.0.0.1:4173' },
+  timeout: 30_000,
+  use: {
+    baseURL: process.env.SAUCEDEMO_BASE_URL ?? 'https://www.saucedemo.com',
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+  },
   reporter: [
     ['list'],
     ['json', { outputFile: 'reports/playwright-results.json' }],
   ],
-  webServer: {
-    command: 'npm run demo',
-    url: 'http://127.0.0.1:4173',
-    reuseExistingServer: !process.env.CI,
-  },
 });
