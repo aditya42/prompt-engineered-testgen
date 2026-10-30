@@ -23,6 +23,58 @@ class Phase2Tests(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
 
+    def test_retention_keeps_three_and_never_deletes_unrelated(self):
+        records = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
+                   for i in range(1, 7)]
+        records.append({"id": 99, "name": "Business critical regression"})
+        runner.save(self.state / "run.json", {"id": 6})
+        calls = []
+        def api(endpoint, method="GET", body=None):
+            calls.append((endpoint, method))
+            if endpoint.startswith("get_runs/"):
+                return {"runs": records, "_links": {"next": None}}
+            if endpoint.startswith("delete_run/"):
+                return {}
+            raise AssertionError(endpoint)
+        with patch.object(runner, "tr", side_effect=api):
+            result = runner.prune_runs(True)
+        self.assertEqual(result["deleted"], [3, 2, 1])
+        self.assertEqual(result["preserved"], [4, 5, 6])
+        self.assertNotIn(("delete_run/99", "POST"), calls)
+
+    def test_retention_dry_run_never_deletes(self):
+        runs = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
+                for i in range(1, 5)]
+        with patch.object(runner, "tr", return_value={"runs": runs, "_links": {"next": None}}) as api:
+            result = runner.prune_runs(False)
+        self.assertEqual(result["delete"], [1])
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(api.call_count, 1)
+
+    def test_retention_preserves_active_run(self):
+        runs = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
+                for i in range(1, 6)]
+        runner.save(self.state / "run.json", {"id": 2})
+        with patch.object(runner, "tr", return_value={"runs": runs, "_links": {"next": None}}):
+            result = runner.prune_runs(False)
+        self.assertNotIn(2, result["delete"])
+
+    def test_summary_contains_testrail_and_jira_links(self):
+        runner.save(self.state / "run.json", {"id": 6})
+        runner.save(self.state / "case-map.json", {"SUB-001": 1})
+        runner.save(self.state / "ledger.json", {"6:1:failed": {"jira_key": "KAN-7"}})
+        runner.save(self.state / "retention.json", {"deleted": [1, 2, 3]})
+        runner.save(self.state / "plan.json", {"provider": "mock"})
+        with patch.object(runner, "ROOT", self.state), patch.dict(os.environ, {
+            "TESTRAIL_URL": "https://example.testrail.io",
+            "JIRA_URL": "https://example.atlassian.net"
+        }):
+            summary = runner.execution_summary()
+        self.assertIn("runs/view/6", summary)
+        self.assertIn("cases/view/1", summary)
+        self.assertIn("browse/KAN-7", summary)
+        self.assertIn("R1, R2, R3", summary)
+
     def test_jira_bug_type_resolved_by_id(self):
         with patch.object(runner, "jira", return_value={
             "issueTypes": [{"id": "10001", "name": "Task"},
