@@ -61,24 +61,27 @@ jobs:
               f"{tr}/index.php?/api/v2/get_project/{os.environ['TESTRAIL_PROJECT_ID']}", email, key)
           if err:
               results["TestRail"] = f"FAILED: project lookup {err}"
+          elif not isinstance(project, dict) or str(project.get("id")) != os.environ["TESTRAIL_PROJECT_ID"]:
+              results["TestRail"] = "FAILED: project ID mismatch"
           else:
-              section, err = request_json(
-                  f"{tr}/index.php?/api/v2/get_section/{os.environ['TESTRAIL_SECTION_ID']}", email, key)
+              sections_response, err = request_json(
+                  f"{tr}/index.php?/api/v2/get_sections/{os.environ['TESTRAIL_PROJECT_ID']}", email, key)
               if err:
-                  results["TestRail"] = f"FAILED: section lookup {err}"
-              elif not isinstance(section, dict) or str(section.get("project_id")) != os.environ["TESTRAIL_PROJECT_ID"]:
-                  results["TestRail"] = "FAILED: section/project mismatch (section belongs to project " + str(section.get("project_id")) + ")"
-                  candidates, list_err = request_json(
-                      f"{tr}/index.php?/api/v2/get_sections/{os.environ['TESTRAIL_PROJECT_ID']}", email, key)
-                  if not list_err:
-                      section_list = candidates if isinstance(candidates, list) else candidates.get("sections", [])
-                      print("Valid TestRail sections for project " + os.environ["TESTRAIL_PROJECT_ID"] + ":")
-                      for candidate in section_list[:30]:
-                          print(json.dumps({"id": candidate.get("id"), "name": candidate.get("name"), "parent_id": candidate.get("parent_id")}))
-                  else:
-                      print("Unable to list TestRail sections: " + list_err)
+                  results["TestRail"] = f"FAILED: section listing {err}"
+              elif not isinstance(sections_response, (dict, list)):
+                  results["TestRail"] = "FAILED: invalid section listing response"
               else:
-                  results["TestRail"] = "PASS: project and section accessible"
+                  sections = sections_response if isinstance(sections_response, list) else sections_response.get("sections", [])
+                  section_id = os.environ["TESTRAIL_SECTION_ID"]
+                  matching = [s for s in sections if isinstance(s, dict) and str(s.get("id")) == section_id]
+                  if not matching:
+                      results["TestRail"] = "FAILED: section not found in configured project"
+                      print("Available section IDs:", [s.get("id") for s in sections[:30] if isinstance(s, dict)])
+                  else:
+                      results["TestRail"] = "PASS: project and section accessible"
+                      print("TestRail verified section:", json.dumps({
+                          "id": matching[0].get("id"), "name": matching[0].get("name")
+                      }))
 
           jira = os.environ["JIRA_URL"].rstrip("/")
           email, key = os.environ["JIRA_EMAIL"], os.environ["JIRA_API_TOKEN"]
