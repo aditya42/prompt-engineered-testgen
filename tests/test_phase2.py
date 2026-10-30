@@ -82,8 +82,8 @@ class Phase2Tests(unittest.TestCase):
                 for i in range(1, 6)]
         runner.save(self.state / "run.json", {"id": 2})
         with patch.object(runner, "tr", return_value={"runs": runs, "_links": {"next": None}}):
-            result = runner.prune_runs(False)
-        self.assertNotIn(2, result["delete"])
+            with self.assertRaisesRegex(RuntimeError, "Current execution run"):
+                runner.prune_runs(False)
 
     def test_summary_contains_testrail_and_jira_links(self):
         runner.save(self.state / "run.json", {"id": 6})
