@@ -23,6 +23,30 @@ class Phase2Tests(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
 
+    def test_testrail_pagination_uses_ampersand(self):
+        calls = []
+        def fake_tr(endpoint):
+            calls.append(endpoint)
+            return {"cases": [{"id": 1, "section_id": 1,
+                               "title": "[SUB-001] Already published"}],
+                    "_links": {"next": None}}
+        with patch.object(runner, "tr", side_effect=fake_tr):
+            runner.existing_testrail_cases()
+        self.assertEqual(calls[0], "get_cases/1&limit=250&offset=0")
+
+    def test_run_listing_uses_ampersand(self):
+        runner.save(self.state / "case-map.json", {"SUB-001": 1})
+        calls = []
+        def fake_tr(endpoint, method="GET", body=None):
+            calls.append((endpoint, method))
+            if endpoint.startswith("get_runs/"):
+                return {"runs": [{"id": 8, "name": "PromptTestGen phase 2 run test123"}],
+                        "_links": {"next": None}}
+            raise AssertionError("Unexpected TestRail write")
+        with patch.object(runner, "tr", side_effect=fake_tr):
+            runner.create_run(True)
+        self.assertEqual(calls, [("get_runs/1&limit=250&offset=0", "GET")])
+
     def test_remote_reconciliation_reuses_existing_case(self):
         with patch.object(runner, "tr", return_value={"cases": [
             {"id": 1, "section_id": 1, "title": "[SUB-001] Already published"}
