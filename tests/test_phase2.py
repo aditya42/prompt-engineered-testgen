@@ -24,7 +24,7 @@ class Phase2Tests(unittest.TestCase):
         self.addCleanup(self.env.stop)
 
     def test_clean_error_removes_terminal_ansi_codes(self):
-        dirty = "\\x1b[31mAssertion failed\\x1b[0m"
+        dirty = "\x1b[31mAssertion failed\x1b[0m"
         self.assertEqual(runner.clean_error(dirty), "Assertion failed")
 
     def test_jira_demo_executes_browser_and_result_sync(self):
