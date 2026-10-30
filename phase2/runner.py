@@ -250,15 +250,18 @@ def prune_runs(apply=False, keep=3):
     if keep < 1:
         raise RuntimeError("Retention must preserve at least one run")
     active_id = read(STATE / "run.json", {}).get("id")
+    scope = os.getenv("TESTRAIL_RETENTION_SCOPE", "managed")
+    if scope not in ("managed", "project"):
+        raise RuntimeError("Unsupported retention scope")
     managed = [r for r in project_runs()
-               if str(r.get("name", "")).startswith(RUN_PREFIX)]
+               if scope == "project" or str(r.get("name", "")).startswith(RUN_PREFIX)]
     managed.sort(key=lambda r: int(r["id"]), reverse=True)
     keep_ids = {int(r["id"]) for r in managed[:keep]}
-    if active_id is not None:
-        keep_ids.add(int(active_id))
+    if active_id is not None and int(active_id) not in keep_ids:
+        raise RuntimeError("Current execution run is not among newest three; refusing cleanup")
     # Refuse an unsafe cleanup that would delete a current execution run.
     victims = [r for r in managed if int(r["id"]) not in keep_ids]
-    outcome = {"dry_run": not apply, "keep": keep,
+    outcome = {"dry_run": not apply, "keep": keep, "scope": scope,
                "preserved": sorted(keep_ids),
                "delete": [int(r["id"]) for r in victims]}
     if apply:
