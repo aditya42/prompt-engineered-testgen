@@ -67,7 +67,16 @@ jobs:
               if err:
                   results["TestRail"] = f"FAILED: section lookup {err}"
               elif not isinstance(section, dict) or str(section.get("project_id")) != os.environ["TESTRAIL_PROJECT_ID"]:
-                  results["TestRail"] = "FAILED: section/project mismatch"
+                  results["TestRail"] = "FAILED: section/project mismatch (section belongs to project " + str(section.get("project_id")) + ")"
+                  candidates, list_err = request_json(
+                      f"{tr}/index.php?/api/v2/get_sections/{os.environ['TESTRAIL_PROJECT_ID']}", email, key)
+                  if not list_err:
+                      section_list = candidates if isinstance(candidates, list) else candidates.get("sections", [])
+                      print("Valid TestRail sections for project " + os.environ["TESTRAIL_PROJECT_ID"] + ":")
+                      for candidate in section_list[:30]:
+                          print(json.dumps({"id": candidate.get("id"), "name": candidate.get("name"), "parent_id": candidate.get("parent_id")}))
+                  else:
+                      print("Unable to list TestRail sections: " + list_err)
               else:
                   results["TestRail"] = "PASS: project and section accessible"
 
