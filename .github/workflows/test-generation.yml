@@ -1,10 +1,10 @@
-name: Synthetic Test Generation — TestRail, Playwright and Jira
+name: SauceDemo Login — LLM Test Generation
 
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: "Read-only preview or controlled one-case live demo"
+        description: "Read-only preview or live login-case demo"
         type: choice
         required: true
         default: preview
@@ -47,6 +47,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DEMO_INJECT_FAILURE: ${{ inputs.action == 'jira-demo' }}
       DEMO_ACTION: ${{ inputs.action }}
+      SAUCEDEMO_BASE_URL: https://www.saucedemo.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -65,7 +66,7 @@ jobs:
       - name: Generate and preview case (no writes)
         if: inputs.action == 'preview'
         run: python -m test_generation.runner publish --provider ${{ inputs.provider }}
-      - name: Publish one case and create TestRail run
+      - name: Publish SauceDemo login cases and create TestRail run
         if: inputs.action != 'preview'
         run: |
           python -m test_generation.runner publish --apply --provider ${{ inputs.provider }}
