@@ -27,6 +27,7 @@ class Phase2Tests(unittest.TestCase):
         workflow = (Path(__file__).resolve().parent.parent /
                     ".github" / "workflows" / "phase2.yml").read_text()
         self.assertIn("python -m phase2.runner prune-runs --apply", workflow)
+        self.assertIn("TESTRAIL_RETENTION_SCOPE: project", workflow)
         self.assertIn("python -m phase2.runner summary", workflow)
         self.assertIn("if: ${{ always() && inputs.action != 'preview' }}", workflow)
 
@@ -48,6 +49,24 @@ class Phase2Tests(unittest.TestCase):
         self.assertEqual(result["deleted"], [3, 2, 1])
         self.assertEqual(result["preserved"], [4, 5, 6])
         self.assertNotIn(("delete_run/99", "POST"), calls)
+
+    def test_project_scope_removes_all_older_project_runs(self):
+        runs = [{"id": i, "name": ("Other suite" if i == 1 else "PromptTestGen phase 2 run " + str(i))}
+                for i in range(1, 6)]
+        runner.save(self.state / "run.json", {"id": 5})
+        calls = []
+        def fake_tr(endpoint, method="GET", body=None):
+            calls.append((endpoint, method))
+            if endpoint.startswith("get_runs/"):
+                return {"runs": runs, "_links": {"next": None}}
+            if endpoint.startswith("delete_run/"):
+                return {}
+            raise AssertionError(endpoint)
+        with patch.dict(os.environ, {"TESTRAIL_RETENTION_SCOPE": "project"}), patch.object(runner, "tr", side_effect=fake_tr):
+            result = runner.prune_runs(True)
+        self.assertEqual(result["deleted"], [2, 1])
+        self.assertEqual(result["preserved"], [3, 4, 5])
+        self.assertIn(("delete_run/1", "POST"), calls)
 
     def test_retention_dry_run_never_deletes(self):
         runs = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
