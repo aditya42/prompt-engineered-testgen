@@ -175,14 +175,37 @@ def create_run(apply):
     if previous.get("id"):
         print(json.dumps({"run_id": previous["id"], "reused": True}))
         return
-    payload = {"name": "PromptTestGen phase 2 run " + os.getenv("GITHUB_RUN_ID", "local"), "include_all": False,
+    name = "PromptTestGen phase 2 run " + os.getenv("GITHUB_RUN_ID", "local")
+    payload = {"name": name, "include_all": False,
                "case_ids": sorted(set(mapping.values()))}
     if os.getenv("TESTRAIL_SUITE_ID"):
         payload["suite_id"] = int(os.environ["TESTRAIL_SUITE_ID"])
     if apply:
-        res = tr("add_run/" + os.environ["TESTRAIL_PROJECT_ID"], "POST", payload)
-        save(STATE / "run.json", {"id": int(res["id"])})
-        print(json.dumps({"run_id": res["id"], "created": True}))
+        # A job retry uses the same GITHUB_RUN_ID, so locate that run before POST.
+        project = os.environ["TESTRAIL_PROJECT_ID"]
+        offset = 0
+        existing = None
+        while True:
+            response = tr(f"get_runs/{project}?limit=250&offset={offset}")
+            runs = response if isinstance(response, list) else response.get("runs", [])
+            existing = next((r for r in runs if r.get("name") == name), None)
+            if existing:
+                break
+            link = response.get("_links", {}).get("next") if isinstance(response, dict) else None
+            if not link:
+                break
+            offset += len(runs)
+            if not runs or offset > 10000:
+                raise RuntimeError("TestRail run pagination exceeded safety limit")
+        if existing:
+            run_id = int(existing["id"])
+            reused = True
+        else:
+            created = tr("add_run/" + project, "POST", payload)
+            run_id = int(created["id"])
+            reused = False
+        save(STATE / "run.json", {"id": run_id})
+        print(json.dumps({"run_id": run_id, "reused": reused}))
     else:
         print(json.dumps({"dry_run": True, "would_create": payload}))
 
