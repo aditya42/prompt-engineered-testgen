@@ -35,6 +35,7 @@ jobs:
     env:
       TESTRAIL_URL: https://testrailspersonal.testrail.io
       TESTRAIL_PROJECT_ID: "1"
+      TESTRAIL_RETENTION_SCOPE: project
       TESTRAIL_SECTION_ID: "1"
       TESTRAIL_SUITE_ID: ${{ vars.TESTRAIL_SUITE_ID }}
       TESTRAIL_EMAIL: ${{ secrets.TESTRAIL_EMAIL }}
@@ -84,7 +85,7 @@ jobs:
       - name: Create or reconcile synthetic Jira issue
         if: inputs.action == 'jira-demo'
         run: python -m phase2.runner sync --apply --create-bugs
-      - name: Retain only the latest 3 PromptTestGen TestRail runs
+      - name: Retain only the latest 3 TestRail runs in project 1
         if: ${{ always() && inputs.action != 'preview' }}
         run: |
           if [ -f state/run.json ]; then
