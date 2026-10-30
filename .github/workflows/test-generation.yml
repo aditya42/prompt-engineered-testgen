@@ -13,10 +13,10 @@ on:
           - full-demo
           - jira-demo
       provider:
-        description: "Mock fixture or real OpenAI generation"
+        description: "Generate login test cases with OpenAI, or use offline mock"
         type: choice
         required: true
-        default: mock
+        default: openai
         options:
           - mock
           - openai
