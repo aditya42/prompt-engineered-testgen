@@ -66,16 +66,16 @@ jobs:
           python -m phase2.runner publish --apply --provider ${{ inputs.provider }}
           python -m phase2.runner create-run --apply
       - name: Install browser dependencies
-        if: inputs.action == 'full-demo'
+        if: inputs.action != 'preview'
         run: |
           npm install
           npx playwright install --with-deps chromium
       - name: Run generated Playwright test
-        if: inputs.action == 'full-demo'
+        if: inputs.action != 'preview'
         continue-on-error: true
         run: npx playwright test
       - name: Synchronize TestRail results
-        if: inputs.action == 'full-demo'
+        if: inputs.action != 'preview'
         run: python -m phase2.runner sync --apply
       - name: Create or reconcile synthetic Jira issue
         if: inputs.action == 'jira-demo'
