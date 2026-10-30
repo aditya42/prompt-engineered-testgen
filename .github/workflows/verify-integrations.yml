@@ -1,0 +1,74 @@
+name: Verify TestRail and Jira connections
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TESTRAIL_URL: https://testrailspersonal.testrail.io
+      TESTRAIL_PROJECT_ID: "1"
+      TESTRAIL_SECTION_ID: "1"
+      JIRA_URL: https://dhendeaditya510.atlassian.net
+      JIRA_PROJECT_KEY: KAN
+      TESTRAIL_EMAIL: ${{ secrets.TESTRAIL_EMAIL }}
+      TESTRAIL_API_KEY: ${{ secrets.TESTRAIL_API_KEY }}
+      JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+    steps:
+      - name: Check required secrets
+        shell: bash
+        run: |
+          for key in TESTRAIL_EMAIL TESTRAIL_API_KEY JIRA_EMAIL JIRA_API_TOKEN; do
+            if [[ -z "${!key}" ]]; then
+              echo "::error::Missing required secret: $key"
+              exit 1
+            fi
+          done
+      - name: Verify read-only API access
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, json, base64, urllib.request, urllib.error
+
+          def get_json(url, email, key):
+              auth = base64.b64encode(f"{email}:{key}".encode()).decode()
+              request = urllib.request.Request(url, headers={
+                  "Authorization": f"Basic {auth}",
+                  "Accept": "application/json",
+                  "User-Agent": "prompt-engineered-testgen-connection-check"
+              })
+              try:
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as exc:
+                  raise SystemExit(f"Connection failed (HTTP {exc.code}) for {url.split('/api/')[0]}; check credentials and access.")
+              except urllib.error.URLError as exc:
+                  raise SystemExit(f"Network connection failed: {type(exc.reason).__name__}")
+
+          tr = os.environ["TESTRAIL_URL"].rstrip("/")
+          jira = os.environ["JIRA_URL"].rstrip("/")
+          t_email = os.environ["TESTRAIL_EMAIL"]
+          t_key = os.environ["TESTRAIL_API_KEY"]
+          j_email = os.environ["JIRA_EMAIL"]
+          j_key = os.environ["JIRA_API_TOKEN"]
+
+          project = get_json(f"{tr}/index.php?/api/v2/get_project/{os.environ['TESTRAIL_PROJECT_ID']}", t_email, t_key)
+          section = get_json(f"{tr}/index.php?/api/v2/get_section/{os.environ['TESTRAIL_SECTION_ID']}", t_email, t_key)
+          if int(section["project_id"]) != int(os.environ["TESTRAIL_PROJECT_ID"]):
+              raise SystemExit("TestRail section does not belong to configured project.")
+          account = get_json(f"{jira}/rest/api/3/myself", j_email, j_key)
+          jproject = get_json(f"{jira}/rest/api/3/project/{os.environ['JIRA_PROJECT_KEY']}", j_email, j_key)
+          print(json.dumps({
+              "testrail": {"project_id": project.get("id"), "project_name": project.get("name"),
+                           "section_id": section.get("id"), "section_name": section.get("name")},
+              "jira": {"project_key": jproject.get("key"), "project_name": jproject.get("name"),
+                       "authenticated": bool(account.get("accountId"))},
+              "read_only": True, "writes_performed": 0
+          }, indent=2))
+          PY
