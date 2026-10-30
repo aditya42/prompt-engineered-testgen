@@ -27,9 +27,9 @@ class Phase2Tests(unittest.TestCase):
     def test_workflow_retention_and_summary_run_after_live_execution(self):
         workflow = (Path(__file__).resolve().parent.parent /
                     ".github" / "workflows" / "test-generation.yml").read_text()
-        self.assertIn("python -m phase2.runner prune-runs --apply", workflow)
+        self.assertIn("python -m test_generation.runner prune-runs --apply", workflow)
         self.assertIn("TESTRAIL_RETENTION_SCOPE: project", workflow)
-        self.assertIn("python -m phase2.runner summary", workflow)
+        self.assertIn("python -m test_generation.runner summary", workflow)
         self.assertIn("if: ${{ always() && inputs.action != 'preview' }}", workflow)
 
     def test_retention_keeps_three_and_never_deletes_unrelated(self):
@@ -164,7 +164,7 @@ class Phase2Tests(unittest.TestCase):
 
     def test_jira_demo_executes_browser_and_result_sync(self):
         workflow = (Path(__file__).resolve().parent.parent /
-                    ".github" / "workflows" / "phase2.yml").read_text()
+                    ".github" / "workflows" / "test-generation.yml").read_text()
         for step in ("Install browser dependencies", "Run generated Playwright test",
                      "Synchronize TestRail results"):
             block = workflow.split("- name: " + step + "\n", 1)[1].split("\n      - name:", 1)[0]
