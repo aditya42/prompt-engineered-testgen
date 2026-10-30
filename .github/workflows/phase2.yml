@@ -11,6 +11,7 @@ on:
         options:
           - preview
           - full-demo
+          - jira-demo
       provider:
         description: "Mock fixture or real OpenAI generation"
         type: choice
@@ -43,6 +44,7 @@ jobs:
       JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
       JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DEMO_INJECT_FAILURE: ${{ inputs.action == 'jira-demo' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -57,7 +59,7 @@ jobs:
         if: inputs.action == 'preview'
         run: python -m phase2.runner publish --provider ${{ inputs.provider }}
       - name: Publish one case and create TestRail run
-        if: inputs.action == 'full-demo'
+        if: inputs.action != 'preview'
         run: |
           python -m phase2.runner publish --apply --provider ${{ inputs.provider }}
           python -m phase2.runner create-run --apply
@@ -73,6 +75,9 @@ jobs:
       - name: Synchronize TestRail results
         if: inputs.action == 'full-demo'
         run: python -m phase2.runner sync --apply
+      - name: Create or reconcile synthetic Jira issue
+        if: inputs.action == 'jira-demo'
+        run: python -m phase2.runner sync --apply --create-bugs
       - name: Upload generated cases and run mapping
         if: always()
         uses: actions/upload-artifact@v4
