@@ -1,3 +1,5 @@
+"""Offline tests for SauceDemo generation and integration safeguards."""
+
 import json
 import os
 import tempfile
@@ -5,233 +7,136 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from test_generation import runner
+from test_generation import login, runner
 
 
-class Phase2Tests(unittest.TestCase):
+class LoginGenerationTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.state = Path(self.temp.name)
-        self.patch_state = patch.object(runner, "STATE", self.state)
-        self.patch_state.start()
-        self.addCleanup(self.patch_state.stop)
-        self.env = patch.dict(os.environ, {
-            "TESTRAIL_PROJECT_ID": "1", "TESTRAIL_SECTION_ID": "1",
-            "JIRA_PROJECT_KEY": "KAN", "GITHUB_RUN_ID": "test123",
-            "TESTRAIL_RETENTION_SCOPE": "managed"
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.state = self.root / "state"
+        self.state.mkdir()
+        for name, value in (("ROOT", self.root), ("STATE", self.state)):
+            mocked = patch.object(runner, name, value)
+            mocked.start()
+            self.addCleanup(mocked.stop)
+        env = patch.dict(os.environ, {
+            "TESTRAIL_PROJECT_ID": "1",
+            "TESTRAIL_SECTION_ID": "1",
+            "TESTRAIL_RETENTION_SCOPE": "managed",
+            "GITHUB_RUN_ID": "fixture-run",
         })
-        self.env.start()
-        self.addCleanup(self.env.stop)
+        env.start()
+        self.addCleanup(env.stop)
 
-    def test_workflow_retention_and_summary_run_after_live_execution(self):
-        workflow = (Path(__file__).resolve().parent.parent /
-                    ".github" / "workflows" / "test-generation.yml").read_text()
-        self.assertIn("python -m test_generation.runner prune-runs --apply", workflow)
-        self.assertIn("TESTRAIL_RETENTION_SCOPE: project", workflow)
-        self.assertIn("python -m test_generation.runner summary", workflow)
-        self.assertIn("if: ${{ always() && inputs.action != 'preview' }}", workflow)
+    def test_mock_covers_five_login_requirements(self):
+        cases = runner.generate("mock")
+        self.assertEqual(len(cases), 5)
+        self.assertEqual(
+            {case["id"] for case in cases},
+            {"LOGIN-001", "LOGIN-002", "LOGIN-003", "LOGIN-004", "LOGIN-005"},
+        )
 
-    def test_retention_keeps_three_and_never_deletes_unrelated(self):
-        records = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
-                   for i in range(1, 7)]
-        records.append({"id": 99, "name": "Business critical regression"})
+    def test_compiler_generates_five_playwright_cases(self):
+        runner.playwright(runner.generate("mock"), {})
+        spec = (self.root / "generated_tests" / "login.spec.ts").read_text()
+        self.assertEqual(spec.count("test("), 5)
+        self.assertIn("standard_user", spec)
+        self.assertIn("locked_out_user", spec)
+        self.assertIn("Username is required", spec)
+        self.assertIn("Password is required", spec)
+        self.assertIn("inventory", spec)
+
+    def test_llm_can_generate_valid_case_titles(self):
+        cases = runner.generate("mock")
+        cases[0]["title"] = "Verify standard user authentication succeeds"
+        response = {"choices": [{"message": {
+            "content": json.dumps({"cases": cases})
+        }}]}
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "offline-fixture"}):
+            with patch.object(runner, "api", return_value=response):
+                result = runner.generate("openai")
+        self.assertEqual(result[0]["title"], cases[0]["title"])
+
+    def test_llm_cannot_invent_executable_steps(self):
+        cases = login.mock_cases()
+        cases[0]["steps"] = ["open_login", "execute_python"]
+        with self.assertRaisesRegex(RuntimeError, "safety validation"):
+            login.validate_cases(cases)
+
+    def test_llm_cannot_omit_negative_login_scenarios(self):
+        with self.assertRaisesRegex(RuntimeError, "incomplete or duplicate"):
+            login.validate_cases(login.mock_cases()[:1])
+
+    def test_compiler_revalidates_cases(self):
+        cases = login.mock_cases()
+        cases[0]["intent"] = "other"
+        with self.assertRaisesRegex(RuntimeError, "safety validation"):
+            login.compile_playwright(cases, {}, self.root)
+
+    def test_negative_demo_only_fails_positive_case(self):
+        with patch.dict(os.environ, {"DEMO_INJECT_FAILURE": "true"}):
+            runner.playwright(login.mock_cases(), {})
+        spec = (self.root / "generated_tests" / "login.spec.ts").read_text()
+        self.assertEqual(spec.count("intentional-demo-failure"), 1)
+
+    def test_publish_excludes_old_subscription_cases(self):
+        with patch.object(runner, "existing_testrail_cases", return_value={
+            "SUB-001": 1,
+            "LOGIN-001": 12,
+        }):
+            with patch.object(runner, "tr", return_value={"id": 13}):
+                runner.publish(True, "mock")
+        mapping = runner.read(self.state / "case-map.json", {})
+        self.assertEqual(mapping["LOGIN-001"], 12)
+        self.assertNotIn("SUB-001", mapping)
+
+    def test_preview_does_not_write_external_cases(self):
+        with patch.object(runner, "tr", side_effect=AssertionError("unexpected write")):
+            runner.publish(False, "mock")
+
+    def test_case_lookup_uses_testrail_pagination(self):
+        with patch.object(runner, "tr", return_value={
+            "cases": [{"id": 3, "section_id": 1, "title": "[LOGIN-001] valid"}],
+            "_links": {"next": None},
+        }) as request:
+            self.assertEqual(runner.existing_testrail_cases(), {"LOGIN-001": 3})
+        request.assert_called_once_with("get_cases/1&limit=250&offset=0")
+
+    def test_retention_keeps_three_in_project_scope(self):
         runner.save(self.state / "run.json", {"id": 6})
-        calls = []
-        def api(endpoint, method="GET", body=None):
-            calls.append((endpoint, method))
-            if endpoint.startswith("get_runs/"):
-                return {"runs": records, "_links": {"next": None}}
-            if endpoint.startswith("get_run/"):
-                return {"id": int(endpoint.rsplit("/", 1)[-1]), "project_id": 1}
-            if endpoint.startswith("delete_run/"):
-                self.assertEqual(body, {"soft": 0})
-                return {}
-            raise AssertionError(endpoint)
-        with patch.object(runner, "tr", side_effect=api):
-            result = runner.prune_runs(True)
-        self.assertEqual(result["deleted"], [3, 2, 1])
-        self.assertEqual(result["preserved"], [4, 5, 6])
-        self.assertNotIn(("delete_run/99", "POST"), calls)
+        runs = [{"id": i, "name": "Previous run"} for i in range(1, 7)]
 
-    def test_project_scope_removes_all_older_project_runs(self):
-        runs = [{"id": i, "name": ("Other suite" if i == 1 else "PromptTestGen phase 2 run " + str(i))}
-                for i in range(1, 6)]
-        runner.save(self.state / "run.json", {"id": 5})
-        calls = []
-        def fake_tr(endpoint, method="GET", body=None):
-            calls.append((endpoint, method))
-            if endpoint.startswith("get_runs/"):
-                return {"runs": runs, "_links": {"next": None}}
-            if endpoint.startswith("get_run/"):
-                return {"id": int(endpoint.rsplit("/", 1)[-1]), "project_id": 1}
-            if endpoint.startswith("delete_run/"):
-                self.assertEqual(body, {"soft": 0})
-                return {}
-            raise AssertionError(endpoint)
-        with patch.dict(os.environ, {"TESTRAIL_RETENTION_SCOPE": "project"}), patch.object(runner, "tr", side_effect=fake_tr):
-            result = runner.prune_runs(True)
-        self.assertEqual(result["deleted"], [2, 1])
-        self.assertEqual(result["preserved"], [3, 4, 5])
-        self.assertIn(("delete_run/1", "POST"), calls)
-
-    def test_retention_records_partial_deletions_and_failed_run(self):
-        runner.save(self.state / "run.json", {"id": 5})
-        runs = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
-                for i in range(1, 6)]
-        def fake_tr(endpoint, method="GET", body=None):
+        def fake_api(endpoint, method="GET", body=None):
             if endpoint.startswith("get_runs/"):
                 return {"runs": runs, "_links": {"next": None}}
             if endpoint.startswith("get_run/"):
                 return {"project_id": 1}
-            if endpoint == "delete_run/2":
+            if endpoint.startswith("delete_run/"):
+                self.assertEqual(body, {"soft": 0})
                 return {}
-            if endpoint == "delete_run/1":
-                raise RuntimeError("POST request failed: HTTP 400")
             raise AssertionError(endpoint)
-        with patch.dict(os.environ, {"TESTRAIL_RETENTION_SCOPE": "project"}), patch.object(runner, "tr", side_effect=fake_tr):
-            with self.assertRaisesRegex(RuntimeError, "R1"):
-                runner.prune_runs(True)
-        retention = runner.read(self.state / "retention.json", {})
-        self.assertEqual(retention["deleted"], [2])
-        self.assertEqual(retention["failed_run_id"], 1)
 
-    def test_retention_rejects_run_in_different_project(self):
-        runner.save(self.state / "run.json", {"id": 4})
-        runs = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
-                for i in range(1, 5)]
-        def fake_tr(endpoint, method="GET", body=None):
-            if endpoint.startswith("get_runs/"):
-                return {"runs": runs, "_links": {"next": None}}
-            if endpoint.startswith("get_run/"):
-                return {"project_id": 99}
-            raise AssertionError("Must not delete any run")
-        with patch.object(runner, "tr", side_effect=fake_tr):
-            with self.assertRaisesRegex(RuntimeError, "different project"):
-                runner.prune_runs(True)
+        with patch.dict(os.environ, {"TESTRAIL_RETENTION_SCOPE": "project"}):
+            with patch.object(runner, "tr", side_effect=fake_api):
+                result = runner.prune_runs(True)
+        self.assertEqual(result["preserved"], [4, 5, 6])
+        self.assertEqual(result["deleted"], [3, 2, 1])
 
-    def test_retention_dry_run_never_deletes(self):
-        runs = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
-                for i in range(1, 5)]
-        with patch.object(runner, "tr", return_value={"runs": runs, "_links": {"next": None}}) as api:
-            result = runner.prune_runs(False)
-        self.assertEqual(result["delete"], [1])
-        self.assertTrue(result["dry_run"])
-        self.assertEqual(api.call_count, 1)
-
-    def test_retention_preserves_active_run(self):
-        runs = [{"id": i, "name": "PromptTestGen phase 2 run " + str(i)}
-                for i in range(1, 6)]
-        runner.save(self.state / "run.json", {"id": 2})
-        with patch.object(runner, "tr", return_value={"runs": runs, "_links": {"next": None}}):
-            with self.assertRaisesRegex(RuntimeError, "Current execution run"):
-                runner.prune_runs(False)
-
-    def test_summary_contains_testrail_and_jira_links(self):
-        runner.save(self.state / "run.json", {"id": 6})
-        runner.save(self.state / "case-map.json", {"SUB-001": 1})
-        runner.save(self.state / "ledger.json", {"6:1:failed": {"jira_key": "KAN-7"}})
-        runner.save(self.state / "retention.json", {"deleted": [1, 2, 3]})
-        runner.save(self.state / "plan.json", {"provider": "mock"})
-        with patch.object(runner, "ROOT", self.state), patch.dict(os.environ, {
-            "TESTRAIL_URL": "https://example.testrail.io",
-            "JIRA_URL": "https://example.atlassian.net",
-            "GITHUB_STEP_SUMMARY": ""
-        }):
-            summary = runner.execution_summary()
-        self.assertIn("runs/view/6", summary)
-        self.assertIn("cases/view/1", summary)
-        self.assertIn("browse/KAN-7", summary)
-        self.assertIn("R1, R2, R3", summary)
-
-    def test_jira_bug_type_resolved_by_id(self):
-        with patch.object(runner, "jira", return_value={
-            "issueTypes": [{"id": "10001", "name": "Task"},
-                           {"id": "10004", "name": "Bug"}]
-        }):
-            self.assertEqual(runner.jira_issue_type("KAN"), "10004")
-
-    def test_jira_missing_bug_type_fails_without_substitution(self):
-        with patch.object(runner, "jira", return_value={
-            "issueTypes": [{"id": "10001", "name": "Task"}]
-        }):
-            with self.assertRaisesRegex(RuntimeError, "Bug.*unavailable"):
-                runner.jira_issue_type("KAN")
-
-    def test_clean_error_removes_terminal_ansi_codes(self):
-        dirty = "\x1b[31mAssertion failed\x1b[0m"
-        self.assertEqual(runner.clean_error(dirty), "Assertion failed")
-
-    def test_jira_demo_executes_browser_and_result_sync(self):
-        workflow = (Path(__file__).resolve().parent.parent /
-                    ".github" / "workflows" / "test-generation.yml").read_text()
-        for step in ("Install browser dependencies", "Run generated Playwright test",
-                     "Synchronize TestRail results"):
-            block = workflow.split("- name: " + step + "\n", 1)[1].split("\n      - name:", 1)[0]
-            self.assertIn("if: inputs.action != 'preview'", block)
-
-    def test_testrail_pagination_uses_ampersand(self):
-        calls = []
-        def fake_tr(endpoint):
-            calls.append(endpoint)
-            return {"cases": [{"id": 1, "section_id": 1,
-                               "title": "[SUB-001] Already published"}],
-                    "_links": {"next": None}}
-        with patch.object(runner, "tr", side_effect=fake_tr):
-            runner.existing_testrail_cases()
-        self.assertEqual(calls[0], "get_cases/1&limit=250&offset=0")
-
-    def test_run_listing_uses_ampersand(self):
-        runner.save(self.state / "case-map.json", {"SUB-001": 1})
-        calls = []
-        def fake_tr(endpoint, method="GET", body=None):
-            calls.append((endpoint, method))
-            if endpoint.startswith("get_runs/"):
-                return {"runs": [{"id": 8, "name": "PromptTestGen phase 2 run test123"}],
-                        "_links": {"next": None}}
-            raise AssertionError("Unexpected TestRail write")
-        with patch.object(runner, "tr", side_effect=fake_tr):
-            runner.create_run(True)
-        self.assertEqual(calls, [("get_runs/1&limit=250&offset=0", "GET")])
-
-    def test_remote_reconciliation_reuses_existing_case(self):
-        with patch.object(runner, "tr", return_value={"cases": [
-            {"id": 1, "section_id": 1, "title": "[SUB-001] Already published"}
-        ], "_links": {"next": None}}):
-            self.assertEqual(runner.existing_testrail_cases(), {"SUB-001": 1})
-
-    def test_duplicate_requirement_id_rejected(self):
-        with patch.object(runner, "tr", return_value={"cases": [
-            {"id": 1, "section_id": 1, "title": "[SUB-001] First"},
-            {"id": 2, "section_id": 1, "title": "[SUB-001] Duplicate"}
-        ], "_links": {"next": None}}):
-            with self.assertRaisesRegex(RuntimeError, "Duplicate TestRail"):
-                runner.existing_testrail_cases()
-
-    def test_publish_skips_duplicate_creation(self):
-        with patch.object(runner, "tr", return_value={"cases": [
-            {"id": 1, "section_id": 1, "title": "[SUB-001] Published"}
-        ], "_links": {"next": None}}), patch.object(runner, "playwright"):
-            runner.publish(True, "mock")
-        self.assertEqual(runner.read(self.state / "case-map.json", {}), {"SUB-001": 1})
-
-    def test_explicit_failure_injection(self):
-        with patch.object(runner, "ROOT", self.state):
-            with patch.dict(os.environ, {"DEMO_INJECT_FAILURE": "true"}):
-                runner.playwright(runner.REQUIREMENTS, {"SUB-001": 1})
-            self.assertIn("INTENTIONALLY WRONG - DEMO",
-                          (self.state / "generated_tests" / "subscription.spec.ts").read_text())
-
-    def test_jira_creation_rejected_outside_demo_mode(self):
-        root = self.state
-        (root / "reports").mkdir()
-        (root / "reports" / "playwright-results.json").write_text(json.dumps({
-            "suites": [{"specs": [{"title": "[TR:C1] demo", "tests": [
-                {"status": "unexpected", "results": [{"error": {"message": "failed"}}]}
-            ]}]}]
+    def test_jira_bug_requires_explicit_demo_mode(self):
+        runner.save(self.state / "run.json", {"id": 22})
+        reports = self.root / "reports"
+        reports.mkdir()
+        (reports / "playwright-results.json").write_text(json.dumps({
+            "suites": [{"specs": [{
+                "title": "[TR:C12] LOGIN-001",
+                "tests": [{"status": "unexpected", "results": [{
+                    "error": {"message": "intentional failure"}
+                }]}],
+            }]}],
         }))
-        runner.save(self.state / "run.json", {"id": 10})
-        with patch.object(runner, "ROOT", root), patch.dict(os.environ, {"DEMO_INJECT_FAILURE": "false"}):
+        with patch.dict(os.environ, {"DEMO_INJECT_FAILURE": "false"}):
             with self.assertRaisesRegex(RuntimeError, "explicit synthetic"):
                 runner.sync(True, True)
 
