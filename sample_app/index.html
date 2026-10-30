@@ -1,8 +1,0 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><title>StreamBox Demo</title></head><body>
-<h1>StreamBox (fictional demo)</h1>
-<label>Email <input id="email" type="email"></label>
-<button id="subscribe">Subscribe</button><div id="status"></div>
-<script>document.getElementById('subscribe').addEventListener('click',()=>{
-const email=document.getElementById('email').value;
-document.getElementById('status').textContent=/^[^@]+@[^@]+\.[^@]+$/.test(email)?'Subscription active':'Invalid email';
-});</script></body></html>
