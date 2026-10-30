@@ -39,7 +39,7 @@ TestRail run + pass/fail result
 - **Cross-run duplicate prevention:** on each live publish, the runner queries TestRail cases for the project and reconciles requirement markers such as `[SUB-001]`, rather than relying on ephemeral GitHub runner files.
 - **Controlled Jira creation:** only the manually selected `jira-demo` workflow action enables issue creation. It intentionally fails a synthetic test, labels the issue `synthetic-demo`, and searches existing Jira issues by a stable case-specific label before creating another one.
 - **CI evidence:** GitHub Actions uploads generated tests and mappings, and adds an execution summary with clickable TestRail and Jira links.
-- **Three-run retention:** After live executions, older runs managed by this demo are permanently deleted, preserving its most recent three; unrelated TestRail runs and test cases are not deleted.
+- **Three-run retention:** After live executions, older runs in TestRail project 1 are permanently deleted, preserving the latest three runs in that project; TestRail cases and other projects are unaffected.
 
 ### Validated versus unvalidated functionality
 
@@ -94,23 +94,23 @@ The workflow uses a concurrency group to avoid overlapping runs. It searches Tes
 
 ## TestRail run retention: latest three
 
-After a live `full-demo` or `jira-demo` run, GitHub Actions automatically attempts to permanently delete old **PromptTestGen-managed TestRail test runs**, keeping the newest three by run ID. This includes the original `PromptTestGen phase 2 controlled demo` run. It does **not** delete TestRail test cases, Jira issues, or unrelated TestRail runs in the same project.
+Following each live `full-demo` or `jira-demo`, GitHub Actions uses **`TESTRAIL_RETENTION_SCOPE=project`** to retain the newest **three test runs in TestRail project `1`** by run ID. **All older runs in that project are permanently deleted, regardless of their names or which workflow created them.** TestRail test cases, Jira issues, and runs in other TestRail projects are not deleted.
 
-This cleanup runs after result synchronization, including when a downstream step fails. The next execution will attempt to remove older existing demo runs too. **Deleted runs and their results cannot be restored by this project.** Export important execution history first.
+Cleanup is attempted after the execution even when the Playwright or Jira step fails. It checks the current run is in the newest three before deleting older runs. Download any historical execution evidence first; this project provides no rollback for deleted TestRail runs.
 
-To inspect the proposed deletions without changing TestRail:
-
-```bash
-python3 -m phase2.runner prune-runs
-```
-
-To explicitly apply cleanup outside GitHub Actions:
+With the same environment variable, preview the exact run IDs that would be removed:
 
 ```bash
-python3 -m phase2.runner prune-runs --apply
+TESTRAIL_RETENTION_SCOPE=project python3 -m phase2.runner prune-runs
 ```
 
-**Scope:** The policy guarantees at most three runs *belonging to this demo* when cleanup succeeds. It deliberately preserves unrelated runs; therefore the total TestRail project run count may exceed three.
+To apply the deletion explicitly outside GitHub Actions:
+
+```bash
+TESTRAIL_RETENTION_SCOPE=project python3 -m phase2.runner prune-runs --apply
+```
+
+The default CLI scope without this environment variable is `managed` and deletes only older PromptTestGen-managed runs. The GitHub Actions workflow deliberately uses the broader `project` scope to enforce the requested maximum of three visible runs for project `1`.
 
 ## GitHub Actions execution summary
 
