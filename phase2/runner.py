@@ -313,7 +313,7 @@ def sync(apply, create_bugs):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("command", choices=["verify", "generate", "publish", "create-run", "sync"])
+    p.add_argument("command", choices=["verify", "verify-jira-bug", "generate", "publish", "create-run", "sync"])
     p.add_argument("--apply", action="store_true")
     p.add_argument("--create-bugs", action="store_true")
     p.add_argument("--provider", choices=["mock", "openai"], default="mock")
@@ -321,6 +321,8 @@ def main():
     try:
         if args.command == "verify":
             verify()
+        elif args.command == "verify-jira-bug":
+            print("Jira Bug issue type ID:", jira_issue_type(os.environ["JIRA_PROJECT_KEY"]))
         elif args.command == "generate":
             generate(args.provider)
             playwright(read(STATE / "plan.json", {})["cases"], read(STATE / "case-map.json", {}))
