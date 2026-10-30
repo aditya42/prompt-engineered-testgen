@@ -230,6 +230,19 @@ def adf(message):
     return {"type": "doc", "version": 1, "content": [
         {"type": "paragraph", "content": [{"type": "text", "text": x or " "}]} for x in message.splitlines()]}
 
+def jira_issue_type(key, requested="Bug"):
+    """Resolve the actual project-specific Jira issue-type ID, never substitute Task."""
+    project = jira("project/" + urllib.parse.quote(key, safe=""))
+    types = project.get("issueTypes", [])
+    if not types:
+        raise RuntimeError("Jira project API did not expose issue types; configure a supported Bug issue type")
+    match = next((kind for kind in types if kind.get("name", "").casefold() == requested.casefold()), None)
+    if not match:
+        names = ", ".join(str(kind.get("name", ""))[:60] for kind in types[:15])
+        raise RuntimeError("Jira issue type '" + requested + "' is unavailable in project " +
+                           key + "; available: " + names)
+    return str(match["id"])
+
 def sync(apply, create_bugs):
     report = read(ROOT / "reports" / "playwright-results.json", {})
     run_id = read(STATE / "run.json", {}).get("id")
@@ -286,7 +299,8 @@ def sync(apply, create_bugs):
             if existing:
                 bug_key = existing[0]["key"]
             else:
-                body = {"fields": {"project": {"key": key}, "issuetype": {"name": "Bug"},
+                issue_type_id = jira_issue_type(key)
+                body = {"fields": {"project": {"key": key}, "issuetype": {"id": issue_type_id},
                        "summary": f"[SYNTHETIC DEMO] TestRail C{cid} intentionally failed"[:240],
                        "description": adf("SYNTHETIC DEMONSTRATION - NOT A PRODUCTION DEFECT\nTestRail run: " + str(run_id) +
                                           "\nTest: " + title + "\nEvidence: " + message),
