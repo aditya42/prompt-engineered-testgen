@@ -2,9 +2,11 @@
   "name": "prompt-engineered-testgen",
   "private": true,
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:browserstack": "browserstack-node-sdk playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "1.56.1"
+    "@playwright/test": "1.56.1",
+    "browserstack-node-sdk": "^1.72.3"
   }
 }
