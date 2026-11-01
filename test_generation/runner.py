@@ -177,6 +177,31 @@ def publish(apply, provider):
     print(json.dumps({"dry_run": not apply, "published_mapping": mapping,
                       "would_publish": [c["id"] for c in cases if c["id"] not in mapping]}))
 
+def testrail_run_name(github_run_id):
+    """Build a descriptive, stable title for a BrowserStack CI test run."""
+    return (
+        "SauceDemo | Login Regression | Playwright on BrowserStack "
+        f"(Chrome, Windows 11) | GitHub #{github_run_id}"
+    )
+
+
+def rename_testrail_run(run_id, github_run_id):
+    """Rename a known run without changing its tests, results or status."""
+    details = tr(f"get_run/{run_id}")
+    if str(details.get("project_id")) != os.environ["TESTRAIL_PROJECT_ID"]:
+        raise RuntimeError("Refusing to rename a run in another TestRail project")
+    old_name = str(details.get("name", ""))
+    expected = f"SauceDemo login run {github_run_id}"
+    new_name = testrail_run_name(github_run_id)
+    if old_name == new_name:
+        print(json.dumps({"run_id": run_id, "name": new_name, "unchanged": True}))
+        return
+    if old_name != expected:
+        raise RuntimeError("Refusing to overwrite an unexpected TestRail run name")
+    tr(f"update_run/{run_id}", "POST", {"name": new_name})
+    print(json.dumps({"run_id": run_id, "old_name": old_name, "new_name": new_name}))
+
+
 def create_run(apply):
     mapping = read(STATE / "case-map.json", {})
     if not mapping:
@@ -185,7 +210,7 @@ def create_run(apply):
     if previous.get("id"):
         print(json.dumps({"run_id": previous["id"], "reused": True}))
         return
-    name = "SauceDemo login run " + os.getenv("GITHUB_RUN_ID", "local")
+    name = testrail_run_name(os.getenv("GITHUB_RUN_ID", "local"))
     payload = {"name": name, "include_all": False,
                "case_ids": sorted(set(mapping.values()))}
     if os.getenv("TESTRAIL_SUITE_ID"):
@@ -471,8 +496,10 @@ def quality_gate():
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("command", choices=["verify", "verify-jira-bug", "generate", "publish", "create-run", "sync", "prune-runs", "summary", "quality-gate"])
+    p.add_argument("command", choices=["verify", "verify-jira-bug", "generate", "publish", "create-run", "sync", "prune-runs", "summary", "quality-gate", "rename-run"])
     p.add_argument("--apply", action="store_true")
+    p.add_argument("--run-id", type=int)
+    p.add_argument("--github-run-id")
     p.add_argument("--create-bugs", action="store_true")
     p.add_argument("--provider", choices=["mock", "openai"], default="mock")
     args = p.parse_args()
@@ -494,6 +521,10 @@ def main():
             prune_runs(args.apply)
         elif args.command == "quality-gate":
             quality_gate()
+        elif args.command == "rename-run":
+            if not args.run_id or not args.github_run_id:
+                raise RuntimeError("rename-run requires --run-id and --github-run-id")
+            rename_testrail_run(args.run_id, args.github_run_id)
         else:
             execution_summary()
     except (RuntimeError, KeyError, ValueError, urllib.error.URLError) as exc:
