@@ -1,7 +1,6 @@
 """Generate and synchronize synthetic tests using TestRail, Playwright and Jira."""
 import argparse
 import base64
-from datetime import datetime, timezone
 import json
 import os
 import re
