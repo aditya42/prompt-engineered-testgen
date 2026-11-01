@@ -315,6 +315,47 @@ class LoginGenerationTests(unittest.TestCase):
         ledger = runner.read(self.state / "ledger.json", {})
         self.assertEqual(ledger["23:12:failed"]["jira_key"], "KAN-101")
 
+    def test_known_training_defect_jira_issue_is_labelled_as_demo(self):
+        runner.save(self.state / "run.json", {"id": 25})
+        reports = self.root / "reports"
+        reports.mkdir()
+        (reports / "playwright-results.json").write_text(json.dumps({
+            "suites": [{"specs": [{
+                "title": "[TR:C7] [DEMO-001] known training cart failure",
+                "tests": [{"status": "unexpected", "results": [
+                    {"status": "failed", "error": {
+                        "message": "expect(locator).toHaveText failed",
+                    }},
+                    {"status": "failed", "error": {
+                        "message": "expect(locator).toHaveText failed",
+                    }},
+                ]}],
+            }]}],
+        }))
+        created = []
+
+        def fake_jira(path, method="GET", body=None):
+            if path.startswith("search/jql?"):
+                return {"issues": []}
+            if path.startswith("project/"):
+                return {"issueTypes": [{"name": "Bug", "id": "10010"}]}
+            if path == "issue" and method == "POST":
+                created.append(body["fields"])
+                return {"key": "KAN-102"}
+            raise AssertionError(path)
+
+        with patch.dict(os.environ, {
+            "KNOWN_DEFECT_DEMO": "true", "JIRA_PROJECT_KEY": "KAN"
+        }):
+            with patch.object(runner, "tr", return_value={"id": 30}):
+                with patch.object(runner, "jira", side_effect=fake_jira):
+                    runner.sync(True, True)
+        self.assertEqual(len(created), 1)
+        self.assertIn("known-training-defect", created[0]["labels"])
+        self.assertIn("synthetic-demo", created[0]["labels"])
+        self.assertNotIn("needs-triage", created[0]["labels"])
+        self.assertIn("KNOWN TRAINING DEFECT", created[0]["summary"])
+
     def test_flaky_result_is_retest_in_testrail_not_jira_bug(self):
         runner.save(self.state / "run.json", {"id": 24})
         reports = self.root / "reports"
