@@ -1,28 +1,48 @@
-# SauceDemo Login — connected execution guide
+# BrowserStack, TestRail and Jira integration guide
 
-## Application under test
+## 1. BrowserStack setup
 
-- Website: https://www.saucedemo.com/
-- Public demo users: `standard_user` and `locked_out_user`
-- Public demo password: `secret_sauce`
-- Login locators: `[data-test="username"]`, `[data-test="password"]`, `[data-test="login-button"]` and `[data-test="error"]`
+Create or use a BrowserStack Automate account. Under GitHub repository **Settings → Secrets and variables → Actions**, configure:
 
-## Test generation
+- `BROWSERSTACK_USERNAME`
+- `BROWSERSTACK_ACCESS_KEY`
 
-`python -m test_generation.runner generate --provider mock` generates five deterministic login cases. `--provider openai` requests structured plans from OpenAI, then validates them against the same acceptance contract before Playwright compilation.
+The BrowserStack Node SDK uses these environment variables. The checked-in `browserstack.yml` contains **placeholders only** and declares a Windows 11 Chrome run with BrowserStack reporting enabled. The workflow executes:
 
-## Manual GitHub Actions workflow
+```bash
+npm install
+npx browserstack-node-sdk playwright test
+```
 
-- `preview` generates the login test plans and test spec without remote writes.
-- `full-demo` reconciles TestRail LOGIN-001 through LOGIN-005, creates a run, executes five tests on SauceDemo, and synchronizes pass/fail.
-- `jira-demo` intentionally fails LOGIN-001 and creates/reuses a *synthetic* Jira Bug. This does not indicate a real product defect.
+Use the [BrowserStack Playwright Node SDK guide](https://www.browserstack.com/docs/automate/playwright/getting-started/nodejs/integrate-your-tests) to locate credential and dashboard settings.
 
-Required GitHub secrets are `TESTRAIL_EMAIL`, `TESTRAIL_API_KEY`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, and `OPENAI_API_KEY` for the OpenAI provider. The configured demo destinations are TestRail project 1/section 1 and Jira project KAN.
+## 2. TestRail
 
-The old subscription case SUB-001 remains in TestRail but is not mapped to new SauceDemo test runs.
+Secrets: `TESTRAIL_EMAIL`, `TESTRAIL_API_KEY`. Configured project `1`, section `1`; optional `TESTRAIL_SUITE_ID` Actions variable.
 
-## Retention caution
+The workflow publishes/reconciles LOGIN-001 through LOGIN-005, starts a TestRail run, then submits a linked result for every Playwright test found in the JSON report. The old subscription scenario remains a TestRail case but is excluded from new login runs.
 
-The live workflow permanently deletes all but the latest **three** TestRail runs in project 1, even runs originating elsewhere. It does not delete TestRail test cases or Jira issues. Before triggering a connected run, export important historical results. Review deletion candidates with `TESTRAIL_RETENTION_SCOPE=project python -m test_generation.runner prune-runs`.
+**Destructive retention:** the live workflow permanently deletes *all* TestRail project-1 runs older than the newest three. This includes unrelated runs. TestRail test cases are preserved. Export historical results before running.
 
-Previous live TestRail/Jira runs demonstrated the former subscription scenario. Validate the new SauceDemo integration using a new manual run before claiming its connected test management flow is proven.
+## 3. Jira
+
+Secrets: `JIRA_EMAIL`, `JIRA_API_TOKEN`; configured Jira project `KAN`.
+
+A candidate is eligible for automatic Jira Bug creation only after Playwright attempts the test twice, both attempts fail, recognized assertion evidence is present and no infrastructure-related error is seen. The created ticket is tagged `automated-qa`, `browserstack`, `needs-triage` and a stable per-TestRail-case label to avoid duplicate issues. A team member must verify the root cause and close non-product issues.
+
+A single failure, passing retry, timeout, BrowserStack outage or absent JSON report does not produce a Jira ticket. TestRail still records linked results when available. The final quality gate makes failing/flaky execution visible to stakeholders even when a Jira issue was not created.
+
+## 4. GitHub Actions
+
+Use [BrowserStack Playwright - TestRail and Jira](https://github.com/aditya42/prompt-engineered-testgen/actions/workflows/test-generation.yml).
+
+- `preview`: generates case plans only (does not modify TestRail/Jira)
+- `full-demo`: requires BrowserStack, TestRail, Jira, and (if selected) OpenAI credentials; runs end to end
+
+Use `provider=mock` for deterministic validation, `provider=openai` for real structured case generation. `preview` still verifies read access to external integrations.
+
+The quality workflow `.github/workflows/code-quality.yml` continues to use local Playwright for no-credential pull-request smoke testing; this does not replace BrowserStack live execution.
+
+## 5. Validation
+
+Offline unit tests, lint and local browser smoke checks are automatic. Live BrowserStack execution and Jira behavior need a credentialed manual run; no successful remote session is claimed until confirmed.
