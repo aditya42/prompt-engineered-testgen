@@ -1,6 +1,7 @@
 """Generate and synchronize synthetic tests using TestRail, Playwright and Jira."""
 import argparse
 import base64
+from datetime import datetime, timezone
 import json
 import os
 import re
@@ -210,12 +211,18 @@ def publish(apply, provider):
     print(json.dumps({"dry_run": not apply, "published_mapping": mapping,
                       "would_publish": [c["id"] for c in cases if c["id"] not in mapping]}))
 
-def testrail_run_name(github_run_id):
-    """Build a descriptive, stable title for a BrowserStack CI test run."""
-    return (
-        "SauceDemo | Login + Cart Regression | Playwright on BrowserStack "
-        f"(Chrome, Windows 11) | GitHub #{github_run_id}"
-    )
+def testrail_run_name(github_run_id=None):
+    """A readable run title without CI execution identifiers."""
+    scope = ("Login + Cart + Known Defect Demo"
+             if os.getenv("KNOWN_DEFECT_DEMO") == "true"
+             else "Login + Cart Regression")
+    return f"SauceDemo | {scope} | BrowserStack (Chrome / Windows 11)"
+
+
+def testrail_run_description(github_run_id):
+    """Store CI linkage outside the human-facing run name."""
+    return f"GitHub Actions run: {github_run_id}"
+
 
 
 def rename_testrail_run(run_id, github_run_id):
@@ -224,12 +231,15 @@ def rename_testrail_run(run_id, github_run_id):
     if str(details.get("project_id")) != os.environ["TESTRAIL_PROJECT_ID"]:
         raise RuntimeError("Refusing to rename a run in another TestRail project")
     old_name = str(details.get("name", ""))
-    expected = f"SauceDemo login run {github_run_id}"
     new_name = testrail_run_name(github_run_id)
+    legacy_named = (
+        old_name == f"SauceDemo login run {github_run_id}"
+        or old_name.endswith(f"| GitHub #{github_run_id}")
+    )
     if old_name == new_name:
         print(json.dumps({"run_id": run_id, "name": new_name, "unchanged": True}))
         return
-    if old_name != expected:
+    if not legacy_named:
         raise RuntimeError("Refusing to overwrite an unexpected TestRail run name")
     tr(f"update_run/{run_id}", "POST", {"name": new_name})
     print(json.dumps({"run_id": run_id, "old_name": old_name, "new_name": new_name}))
@@ -243,20 +253,35 @@ def create_run(apply):
     if previous.get("id"):
         print(json.dumps({"run_id": previous["id"], "reused": True}))
         return
-    name = testrail_run_name(os.getenv("GITHUB_RUN_ID", "local"))
-    payload = {"name": name, "include_all": False,
+    github_run_id = os.getenv("GITHUB_RUN_ID", "local")
+    name = testrail_run_name(github_run_id)
+    description = testrail_run_description(github_run_id)
+    payload = {"name": name, "description": description, "include_all": False,
                "case_ids": sorted(set(mapping.values()))}
     if os.getenv("TESTRAIL_SUITE_ID"):
         payload["suite_id"] = int(os.environ["TESTRAIL_SUITE_ID"])
     if apply:
-        # A job retry uses the same GITHUB_RUN_ID, so locate that run before POST.
+        # A retry must reuse its existing run, not a different run with the
+        # same descriptive name. GitHub ID lives in description only.
         project = os.environ["TESTRAIL_PROJECT_ID"]
         offset = 0
         existing = None
         while True:
             response = tr(f"get_runs/{project}&limit=250&offset={offset}")
             runs = response if isinstance(response, list) else response.get("runs", [])
-            existing = next((r for r in runs if r.get("name") == name), None)
+            existing = next(
+                (r for r in runs if r.get("description") == description
+                 and r.get("name") == name),
+                None,
+            )
+            if not existing:
+                for candidate in runs:
+                    if candidate.get("name") != name:
+                        continue
+                    detail = tr(f"get_run/{candidate['id']}")
+                    if detail.get("description") == description:
+                        existing = candidate
+                        break
             if existing:
                 break
             link = response.get("_links", {}).get("next") if isinstance(response, dict) else None
