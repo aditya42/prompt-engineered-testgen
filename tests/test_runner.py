@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from test_generation import cart, known_defect, login, runner
+from test_generation import cart, login, runner
 from test_generation.failure_triage import classify_failure
 
 
