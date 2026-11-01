@@ -35,9 +35,52 @@ class LoginGenerationTests(unittest.TestCase):
     def test_testrail_run_name_is_descriptive_and_stable(self):
         name = runner.testrail_run_name("41327291819")
         self.assertIn("SauceDemo | Login + Cart Regression", name)
-        self.assertIn("Playwright on BrowserStack", name)
-        self.assertIn("GitHub #41327291819", name)
+        self.assertIn("BrowserStack (Chrome / Windows 11)", name)
+        self.assertNotIn("41327291819", name)
+        self.assertNotIn("GitHub #", name)
+        self.assertEqual(runner.testrail_run_description("41327291819"),
+                         "GitHub Actions run: 41327291819")
         self.assertEqual(name, runner.testrail_run_name("41327291819"))
+
+    def test_run_creation_keeps_github_identifier_out_of_title(self):
+        runner.save(self.state / "case-map.json", {"LOGIN-001": 2})
+        captured = []
+
+        def fake_testrail(endpoint, method="GET", body=None):
+            captured.append((endpoint, method, body))
+            if endpoint.startswith("get_runs/"):
+                return {"runs": [], "_links": {"next": None}}
+            if endpoint == "add_run/1":
+                return {"id": 42}
+            raise AssertionError(endpoint)
+
+        with patch.object(runner, "tr", side_effect=fake_testrail):
+            runner.create_run(True)
+        body = next(item[2] for item in captured if item[0] == "add_run/1")
+        self.assertNotIn("fixture-run", body["name"])
+        self.assertEqual(body["description"], "GitHub Actions run: fixture-run")
+
+    def test_run_retry_reuses_same_description_not_same_title(self):
+        runner.save(self.state / "case-map.json", {"LOGIN-001": 2})
+        created = []
+
+        def fake_testrail(endpoint, method="GET", body=None):
+            if endpoint.startswith("get_runs/"):
+                return {"runs": [
+                    {"id": 30, "name": runner.testrail_run_name(),
+                     "description": "GitHub Actions run: a-different-run"},
+                    {"id": 31, "name": runner.testrail_run_name(),
+                     "description": "GitHub Actions run: fixture-run"},
+                ], "_links": {"next": None}}
+            if endpoint == "add_run/1":
+                created.append(body)
+                return {"id": 55}
+            raise AssertionError(endpoint)
+
+        with patch.object(runner, "tr", side_effect=fake_testrail):
+            runner.create_run(True)
+        self.assertEqual(runner.read(self.state / "run.json", {})["id"], 31)
+        self.assertFalse(created)
 
     def test_existing_run_renamed_without_changing_results(self):
         calls = []
