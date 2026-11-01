@@ -1,0 +1,27 @@
+name: Rename Existing TestRail Run R9
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TESTRAIL_URL: https://testrailspersonal.testrail.io
+      TESTRAIL_PROJECT_ID: "1"
+      TESTRAIL_EMAIL: ${{ secrets.TESTRAIL_EMAIL }}
+      TESTRAIL_API_KEY: ${{ secrets.TESTRAIL_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Rename R9 to descriptive BrowserStack login regression name
+        run: |
+          python -m test_generation.runner rename-run \
+            --run-id 9 \
+            --github-run-id 41327291819
