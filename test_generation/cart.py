@@ -50,8 +50,8 @@ ACTIONS = {
     "bike_light_visible": ["""await expect(page.locator('[data-test="inventory-item-name"]').filter({ hasText: 'Sauce Labs Bike Light' })).toBeVisible();"""],
     "remove_backpack": ["""await page.locator('[data-test="remove-sauce-labs-backpack"]').click();"""],
     "backpack_absent": ["""await expect(page.locator('[data-test="inventory-item-name"]').filter({ hasText: 'Sauce Labs Backpack' })).toHaveCount(0);"""],
-    "cart_empty": ["""await expect(page.locator('[data-test="cart-item"]')).toHaveCount(0);"""],
-    "one_cart_item": ["""await expect(page.locator('[data-test="cart-item"]')).toHaveCount(1);"""],
+    "cart_empty": ["""await expect(page.locator('.cart_item')).toHaveCount(0);"""],
+    "one_cart_item": ["""await expect(page.locator('.cart_item')).toHaveCount(1);"""],
     "add_button_absent": ["""await expect(page.locator('[data-test="add-to-cart-sauce-labs-backpack"]')).toHaveCount(0);"""],
 }
 
