@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_generation import login, runner
+from test_generation.failure_triage import classify_failure
 
 
 class LoginGenerationTests(unittest.TestCase):
@@ -124,21 +125,79 @@ class LoginGenerationTests(unittest.TestCase):
         self.assertEqual(result["preserved"], [4, 5, 6])
         self.assertEqual(result["deleted"], [3, 2, 1])
 
-    def test_jira_bug_requires_explicit_demo_mode(self):
+    def test_repeated_assertion_failure_is_jira_candidate(self):
+        test = {
+            "status": "unexpected",
+            "results": [
+                {"status": "failed", "error": {"message": "expect(locator).toHaveText failed"}},
+                {"status": "failed", "error": {"message": "expect(locator).toHaveText failed"}},
+            ],
+        }
+        self.assertTrue(classify_failure(test)[0])
+
+    def test_flaky_failure_is_not_jira_candidate(self):
+        test = {
+            "status": "flaky",
+            "results": [
+                {"status": "failed", "error": {"message": "expect(locator) failed"}},
+                {"status": "passed"},
+            ],
+        }
+        self.assertFalse(classify_failure(test)[0])
+
+    def test_single_failure_does_not_create_jira_candidate(self):
+        test = {
+            "status": "unexpected",
+            "results": [
+                {"status": "failed", "error": {"message": "expect(locator) failed"}},
+            ],
+        }
+        self.assertFalse(classify_failure(test)[0])
+
+    def test_infrastructure_failure_does_not_create_jira_candidate(self):
+        test = {
+            "status": "unexpected",
+            "results": [
+                {"status": "failed", "error": {"message": "browserstack connection timed out"}},
+                {"status": "failed", "error": {"message": "browserstack connection timed out"}},
+            ],
+        }
+        self.assertFalse(classify_failure(test)[0])
+
+    def test_sync_never_files_jira_for_untriaged_failure(self):
         runner.save(self.state / "run.json", {"id": 22})
         reports = self.root / "reports"
         reports.mkdir()
         (reports / "playwright-results.json").write_text(json.dumps({
             "suites": [{"specs": [{
-                "title": "[TR:C12] LOGIN-001",
+                "title": "[TR:C12] [LOGIN-001] login",
                 "tests": [{"status": "unexpected", "results": [{
-                    "error": {"message": "intentional failure"}
+                    "status": "failed",
+                    "error": {"message": "BrowserStack connection timed out"},
+                }, {
+                    "status": "failed",
+                    "error": {"message": "BrowserStack connection timed out"},
                 }]}],
             }]}],
         }))
-        with patch.dict(os.environ, {"DEMO_INJECT_FAILURE": "false"}):
-            with self.assertRaisesRegex(RuntimeError, "explicit synthetic"):
+        with patch.object(runner, "tr", return_value={"id": 15}):
+            with patch.object(runner, "jira") as jira_api:
                 runner.sync(True, True)
+        jira_api.assert_not_called()
+
+    def test_missing_report_fails_quality_gate(self):
+        with self.assertRaisesRegex(RuntimeError, "Missing Playwright"):
+            runner.quality_gate()
+
+    def test_workflow_requires_browserstack_and_triggers_jira_triage(self):
+        source = (Path(__file__).resolve().parent.parent
+                  / ".github" / "workflows" / "test-generation.yml").read_text()
+        self.assertIn("BROWSERSTACK_USERNAME", source)
+        self.assertIn("BROWSERSTACK_ACCESS_KEY", source)
+        self.assertIn("browserstack-node-sdk playwright test", source)
+        self.assertIn("sync --apply --create-bugs", source)
+        self.assertIn("quality-gate", source)
+        self.assertNotIn("jira-demo", source)
 
 
 if __name__ == "__main__":
