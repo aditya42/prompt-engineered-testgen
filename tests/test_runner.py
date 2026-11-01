@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from test_generation import login, runner
+from test_generation import cart, login, runner
 from test_generation.failure_triage import classify_failure
 
 
@@ -33,7 +33,7 @@ class LoginGenerationTests(unittest.TestCase):
 
     def test_testrail_run_name_is_descriptive_and_stable(self):
         name = runner.testrail_run_name("41327291819")
-        self.assertIn("SauceDemo | Login Regression", name)
+        self.assertIn("SauceDemo | Login + Cart Regression", name)
         self.assertIn("Playwright on BrowserStack", name)
         self.assertIn("GitHub #41327291819", name)
         self.assertEqual(name, runner.testrail_run_name("41327291819"))
@@ -68,10 +68,11 @@ class LoginGenerationTests(unittest.TestCase):
 
     def test_mock_covers_five_login_requirements(self):
         cases = runner.generate("mock")
-        self.assertEqual(len(cases), 5)
+        self.assertEqual(len(cases), 10)
         self.assertEqual(
             {case["id"] for case in cases},
-            {"LOGIN-001", "LOGIN-002", "LOGIN-003", "LOGIN-004", "LOGIN-005"},
+            {"LOGIN-001", "LOGIN-002", "LOGIN-003", "LOGIN-004", "LOGIN-005",
+             "CART-001", "CART-002", "CART-003", "CART-004", "CART-005"},
         )
 
     def test_compiler_generates_five_playwright_cases(self):
@@ -83,6 +84,26 @@ class LoginGenerationTests(unittest.TestCase):
         self.assertIn("Username is required", spec)
         self.assertIn("Password is required", spec)
         self.assertIn("inventory", spec)
+
+    def test_cart_positive_and_negative_specs_generated(self):
+        runner.playwright(runner.generate("mock"), {})
+        spec = (self.root / "generated_tests" / "cart.spec.ts").read_text()
+        self.assertEqual(spec.count("test("), 5)
+        self.assertIn("[CART-001]", spec)
+        self.assertIn("[CART-005]", spec)
+        self.assertIn("add-to-cart-sauce-labs-backpack", spec)
+        self.assertIn("remove-sauce-labs-backpack", spec)
+        self.assertIn("toHaveCount(0)", spec)
+
+    def test_cart_validation_rejects_unreviewed_failure_injection(self):
+        cases = cart.mock_cases()
+        cases[0]["steps"].append("intentionally_break_product")
+        with self.assertRaisesRegex(RuntimeError, "safety validation"):
+            cart.validate_cases(cases)
+
+    def test_cart_scenarios_start_with_login(self):
+        for case in cart.REQUIREMENTS:
+            self.assertEqual(case["steps"][0], "login")
 
     def test_llm_can_generate_valid_case_titles(self):
         cases = runner.generate("mock")
@@ -113,7 +134,7 @@ class LoginGenerationTests(unittest.TestCase):
 
     def test_negative_demo_only_fails_positive_case(self):
         with patch.dict(os.environ, {"DEMO_INJECT_FAILURE": "true"}):
-            runner.playwright(login.mock_cases(), {})
+            runner.playwright(login.mock_cases() + cart.mock_cases(), {})
         spec = (self.root / "generated_tests" / "login.spec.ts").read_text()
         self.assertEqual(spec.count("intentional-demo-failure"), 1)
 
