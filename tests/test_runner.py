@@ -31,6 +31,41 @@ class LoginGenerationTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
+    def test_testrail_run_name_is_descriptive_and_stable(self):
+        name = runner.testrail_run_name("41327291819")
+        self.assertIn("SauceDemo | Login Regression", name)
+        self.assertIn("Playwright on BrowserStack", name)
+        self.assertIn("GitHub #41327291819", name)
+        self.assertEqual(name, runner.testrail_run_name("41327291819"))
+
+    def test_existing_run_renamed_without_changing_results(self):
+        calls = []
+
+        def fake_testrail(path, method="GET", body=None):
+            calls.append((path, method, body))
+            if path == "get_run/9":
+                return {"id": 9, "project_id": 1,
+                        "name": "SauceDemo login run 41327291819"}
+            if path == "update_run/9":
+                return {"id": 9}
+            raise AssertionError(path)
+
+        with patch.object(runner, "tr", side_effect=fake_testrail):
+            runner.rename_testrail_run(9, "41327291819")
+        self.assertEqual(calls[1][0], "update_run/9")
+        self.assertEqual(calls[1][1], "POST")
+        self.assertEqual(calls[1][2], {
+            "name": runner.testrail_run_name("41327291819"),
+        })
+
+    def test_rename_refuses_unexpected_run_name(self):
+        with patch.object(runner, "tr", return_value={
+            "id": 9, "project_id": 1, "name": "Unrelated release run"
+        }) as api:
+            with self.assertRaisesRegex(RuntimeError, "unexpected TestRail run name"):
+                runner.rename_testrail_run(9, "41327291819")
+        api.assert_called_once()
+
     def test_mock_covers_five_login_requirements(self):
         cases = runner.generate("mock")
         self.assertEqual(len(cases), 5)
