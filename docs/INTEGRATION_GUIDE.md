@@ -20,7 +20,7 @@ Use the [BrowserStack Playwright Node SDK guide](https://www.browserstack.com/do
 
 Secrets: `TESTRAIL_EMAIL`, `TESTRAIL_API_KEY`. Configured project `1`, section `1`; optional `TESTRAIL_SUITE_ID` Actions variable.
 
-The workflow publishes/reconciles LOGIN-001 through LOGIN-005, starts a TestRail run, then submits a linked result for every Playwright test found in the JSON report. The old subscription scenario remains a TestRail case but is excluded from new login runs.
+The workflow publishes/reconciles LOGIN-001 through LOGIN-005 and CART-001 through CART-005, starts a TestRail run, then submits a linked result for every Playwright test found in the JSON report. The old subscription scenario remains a TestRail case but is excluded from new login runs.
 
 **Destructive retention:** the live workflow permanently deletes *all* TestRail project-1 runs older than the newest three. This includes unrelated runs. TestRail test cases are preserved. Export historical results before running.
 
@@ -46,3 +46,11 @@ The quality workflow `.github/workflows/code-quality.yml` continues to use local
 ## 5. Validation
 
 Offline unit tests, lint and local browser smoke checks are automatic. Live BrowserStack execution and Jira behavior need a credentialed manual run; no successful remote session is claimed until confirmed.
+
+## Add-to-cart and known training-defect test
+
+The default regression suite contains five login scenarios and five post-login cart scenarios. Cart tests cover single/multiple item addition, removal, empty state, and duplicate prevention. The action compiler lives in `test_generation/cart.py`.
+
+The separate `known-defect-demo` manual workflow option (provider `mock` only) includes `DEMO-001`, which logs in as SauceDemo's publicly documented intentionally defective `problem_user`, attempts to add the Sauce Labs Fleece Jacket and verifies the cart badge. If this known fault reproduces twice with assertion evidence, it is published as a Failed TestRail result and a Jira Bug **labeled `known-training-defect` and `synthetic-demo`**. It is a real execution of a known demo defect, not proof of a newly discovered production bug.
+
+The training workflow's quality gate expects ten baseline passes plus one failing demo. For ordinary `full-demo` runs, unexpected repeated assertion failures are filed only as `needs-triage` Jira candidates. The absence of a defect cannot be simulated as a genuine bug by intentionally changing assertions.
