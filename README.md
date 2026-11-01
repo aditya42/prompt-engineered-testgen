@@ -87,6 +87,16 @@ For a demonstration backed by **observed website behavior**, select **`known-def
 
 No Jira ticket exists for this new demonstration until the workflow actually runs successfully. The ordinary `full-demo` mode continues to file only **candidate** genuine bugs for unexpected, repeatable failures that require human triage.
 
+## TestRail run naming
+
+TestRail run titles are intentionally human-readable, for example:
+
+`SauceDemo | Login + Cart Regression | BrowserStack (Chrome / Windows 11)`
+
+The **GitHub run number is not included in the TestRail run title**. To preserve traceability and prevent duplicate runs when the same GitHub job is retried, the GitHub Actions run ID is stored in the TestRail **description** instead.
+
+Existing TestRail R9 can be renamed using the one-time [rename R9 workflow](https://github.com/aditya42/prompt-engineered-testgen/actions/workflows/rename-testrail-r9.yml); changing the code does not rename historical runs automatically.
+
 ## TestRail history retention
 
 The connected workflow maintains your requested limit of the **latest three test runs in TestRail project 1** and **permanently deletes older runs in that project**, including unrelated project runs. Test cases and Jira issues are not deleted. Export historical evidence before a connected run.
