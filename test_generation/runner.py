@@ -385,12 +385,12 @@ def sync(apply, create_bugs):
                 )
                 eligible, reason = classify_failure(test)
                 results.append((case_id, failed, message[:2000],
-                                spec["title"], eligible, reason))
+                                spec["title"], eligible, reason, test["status"]))
     if not results:
         raise RuntimeError("No TestRail-linked tests in Playwright JSON results")
 
     ledger = read(STATE / "ledger.json", {})
-    for cid, failed, message, title, eligible, reason in results:
+    for cid, failed, message, title, eligible, reason, status in results:
         fingerprint = f"{run_id}:{cid}:{'failed' if failed else 'passed'}"
         if not apply:
             print(json.dumps({"case_id": cid, "failed": failed,
@@ -398,7 +398,7 @@ def sync(apply, create_bugs):
             continue
         if fingerprint not in ledger:
             response = tr(f"add_result_for_case/{run_id}/{cid}", "POST", {
-                "status_id": 5 if failed else 1,
+                "status_id": {"expected": 1, "unexpected": 5, "flaky": 4}[status],
                 "comment": ("BrowserStack Playwright execution\\n" + message)[:2500],
             })
             ledger[fingerprint] = {
@@ -444,6 +444,7 @@ def sync(apply, create_bugs):
         "linked_tests": len(results),
         "passed": sum(not item[1] for item in results),
         "failed": sum(item[1] for item in results),
+        "flaky": sum(item[6] == "flaky" for item in results),
         "jira_candidates": sum(item[4] for item in results),
     }))
 
