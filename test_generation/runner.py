@@ -10,13 +10,14 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from test_generation import cart, login
+from test_generation import cart, known_defect, login
 from test_generation.failure_triage import classify_failure
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE = ROOT / "state"
 STATE.mkdir(exist_ok=True)
-REQUIREMENTS = login.REQUIREMENTS + cart.REQUIREMENTS
+REQUIREMENTS = (login.REQUIREMENTS + cart.REQUIREMENTS
+                + (known_defect.REQUIREMENTS if os.getenv('KNOWN_DEFECT_DEMO') == 'true' else []))
 ALLOWED = set(login.ACTIONS) | set(cart.ACTIONS)
 
 def api(url, email, secret, method="GET", body=None, bearer=False):
@@ -67,10 +68,14 @@ def generate(provider):
     """Ask OpenAI for login test cases, then validate before compilation."""
     if provider == "mock":
         cases = login.mock_cases() + cart.mock_cases()
+        if os.getenv('KNOWN_DEFECT_DEMO') == 'true':
+            cases += known_defect.mock_cases()
     else:
         key = os.getenv("OPENAI_API_KEY")
         if not key:
             raise RuntimeError("OPENAI_API_KEY is required for live generation")
+        if os.getenv("KNOWN_DEFECT_DEMO") == "true":
+            raise RuntimeError("Known-defect demo must use deterministic mock provider")
         prompt = (
             "You are a QA test designer for https://www.saucedemo.com/. "
             "Generate exactly one structured test case per supplied requirement "
@@ -103,6 +108,11 @@ def generate(provider):
                           and str(c.get("id", "")).startswith("LOGIN-")])
     cart.validate_cases([c for c in cases if isinstance(c, dict)
                          and str(c.get("id", "")).startswith("CART-")])
+    if os.getenv("KNOWN_DEFECT_DEMO") == "true":
+        known_defect.validate_cases([
+            case for case in cases if isinstance(case, dict)
+            and case.get("id") == "DEMO-001"
+        ])
     if len(cases) != len(REQUIREMENTS):
         raise RuntimeError("Generated test cases are incomplete")
     save(STATE / "plan.json", {"cases": cases, "provider": provider})
@@ -119,6 +129,10 @@ def playwright(cases, mapping):
     cart.compile_playwright(
         [case for case in cases if case["id"].startswith("CART-")], mapping, ROOT
     )
+    if os.getenv("KNOWN_DEFECT_DEMO") == "true":
+        known_defect.compile_playwright(
+            [case for case in cases if case["id"] == "DEMO-001"], mapping, ROOT
+        )
 
 
 def verify():
