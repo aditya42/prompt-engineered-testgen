@@ -27,7 +27,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
   playwright-smoke:
-    name: Generate and execute SauceDemo login tests
+    name: Generate and execute SauceDemo login and cart tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
