@@ -11,6 +11,7 @@ import urllib.request
 from pathlib import Path
 
 from test_generation import login
+from test_generation.failure_triage import classify_failure
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE = ROOT / "state"
@@ -314,7 +315,7 @@ def execution_summary():
         lines.append(f"| TestRail execution | [R{run_id}]({tr_url}/index.php?/runs/view/{run_id}) |")
     for key in jira_keys:
         if re.fullmatch(r"[A-Z][A-Z0-9_]*-[0-9]+", key):
-            lines.append(f"| Synthetic Jira Bug | [{key}]({jira_url}/browse/{key}) |")
+            lines.append(f"| Jira defect candidate | [{key}]({jira_url}/browse/{key}) |")
     if not jira_keys:
         lines.append("| Jira Bug | Not created/reused in this execution |")
     text = "\n".join(lines) + "\n"
@@ -359,76 +360,112 @@ def jira_issue_type(key, requested="Bug"):
     return str(match["id"])
 
 def sync(apply, create_bugs):
+    """Publish Playwright results to TestRail and triaged defects to Jira."""
     report = read(ROOT / "reports" / "playwright-results.json", {})
     run_id = read(STATE / "run.json", {}).get("id")
     if apply and not run_id:
-        raise RuntimeError("Missing run ID")
+        raise RuntimeError("Missing TestRail run ID")
     results = []
-    def traverse(node):
-        for spec in node.get("specs", []):
-            marker = re.search(r"\[TR:C(\d+)\]", spec.get("title", ""))
+    for suite in report.get("suites", []):
+        for spec in walk_specs(suite):
+            marker = re.search(r"\\[TR:C(\\d+)\\]", spec.get("title", ""))
             if not marker:
                 continue
             case_id = int(marker.group(1))
             for test in spec.get("tests", []):
-                outcome = test.get("status")
-                if outcome == "skipped":
+                if test.get("status") not in ("expected", "unexpected", "flaky"):
                     continue
-                if outcome not in ("expected", "unexpected", "flaky"):
-                    continue
+                failed = test["status"] == "unexpected"
                 attempts = test.get("results") or []
-                final = attempts[-1] if attempts else {}
-                failure = outcome == "unexpected"
-                error = final.get("error") or {}
-                message = clean_error(str(error.get("message", "")) if isinstance(error, dict) else str(error))
-                results.append((case_id, failure, message[:2000], spec["title"]))
-        for child in node.get("suites", []):
-            traverse(child)
-    for suite in report.get("suites", []):
-        traverse(suite)
+                last = attempts[-1] if attempts else {}
+                error = last.get("error") or {}
+                message = clean_error(
+                    str(error.get("message", ""))
+                    if isinstance(error, dict) else str(error)
+                )
+                eligible, reason = classify_failure(test)
+                results.append((case_id, failed, message[:2000],
+                                spec["title"], eligible, reason))
     if not results:
         raise RuntimeError("No TestRail-linked tests in Playwright JSON results")
+
     ledger = read(STATE / "ledger.json", {})
-    demo_failure = os.getenv("DEMO_INJECT_FAILURE") == "true"
-    if create_bugs and not demo_failure:
-        raise RuntimeError("Jira writes require the explicit synthetic demonstration mode")
-    for cid, failed, message, title in results:
+    for cid, failed, message, title, eligible, reason in results:
         fingerprint = f"{run_id}:{cid}:{'failed' if failed else 'passed'}"
-        if fingerprint in ledger and (not failed or not create_bugs or ledger[fingerprint].get("jira_key")):
-            continue
         if not apply:
-            print(json.dumps({"case_id": cid, "failed": failed, "would_create_jira_bug": failed and create_bugs}))
+            print(json.dumps({"case_id": cid, "failed": failed,
+                              "jira_candidate": eligible, "reason": reason}))
             continue
         if fingerprint not in ledger:
-            response = tr(f"add_result_for_case/{run_id}/{cid}", "POST",
-                          {"status_id": 5 if failed else 1,
-                           "comment": ("Synthetic demo\n" + message)[:2500]})
-            ledger[fingerprint] = {"result_id": response.get("id")}
+            response = tr(f"add_result_for_case/{run_id}/{cid}", "POST", {
+                "status_id": 5 if failed else 1,
+                "comment": ("BrowserStack Playwright execution\\n" + message)[:2500],
+            })
+            ledger[fingerprint] = {
+                "result_id": response.get("id"),
+                "jira_candidate": eligible,
+                "triage_reason": reason,
+            }
             save(STATE / "ledger.json", ledger)
-        if failed and create_bugs:
-            label = f"demo-autotest-tr-c{cid}"
-            key = os.environ["JIRA_PROJECT_KEY"]
-            q = urllib.parse.urlencode({"jql": f'project = "{key}" AND labels = "{label}"',
-                                        "maxResults": 1, "fields": "key"})
-            existing = jira("search/jql?" + q).get("issues", [])
-            if existing:
-                bug_key = existing[0]["key"]
-            else:
-                issue_type_id = jira_issue_type(key)
-                body = {"fields": {"project": {"key": key}, "issuetype": {"id": issue_type_id},
-                       "summary": f"[SYNTHETIC DEMO] TestRail C{cid} intentionally failed"[:240],
-                       "description": adf("SYNTHETIC DEMONSTRATION - NOT A PRODUCTION DEFECT\nTestRail run: " + str(run_id) +
-                                          "\nTest: " + title + "\nEvidence: " + message),
-                       "labels": ["automated-qa", "synthetic-demo", label]}}
-                bug_key = jira("issue", "POST", body)["key"]
-            ledger[fingerprint]["jira_key"] = bug_key
-            save(STATE / "ledger.json", ledger)
-    print(json.dumps({"dry_run": not apply, "linked_tests": len(results),
-                      "passed": sum(not r[1] for r in results), "failed": sum(r[1] for r in results)}))
+        if not (failed and eligible and create_bugs):
+            continue
+        if ledger[fingerprint].get("jira_key"):
+            continue
+        label = f"autotest-login-c{cid}"
+        key = os.environ["JIRA_PROJECT_KEY"]
+        query = urllib.parse.urlencode({
+            "jql": f'project = "{key}" AND labels = "{label}"',
+            "maxResults": 1, "fields": "key",
+        })
+        existing = jira("search/jql?" + query).get("issues", [])
+        if existing:
+            bug_key = existing[0]["key"]
+        else:
+            issue_type_id = jira_issue_type(key)
+            description = (
+                "Repeated Playwright application assertion failure on BrowserStack.\\n"
+                "Classification: candidate product defect; requires human triage.\\n"
+                "TestRail run: " + str(run_id) + "\\nTest: " + title
+                + "\\nEvidence: " + message
+                + "\\nGitHub run: " + os.getenv("GITHUB_RUN_ID", "local")
+            )
+            body = {"fields": {
+                "project": {"key": key},
+                "issuetype": {"id": issue_type_id},
+                "summary": f"[Automation] {title}"[:240],
+                "description": adf(description),
+                "labels": ["automated-qa", "browserstack", "needs-triage", label],
+            }}
+            bug_key = jira("issue", "POST", body)["key"]
+        ledger[fingerprint]["jira_key"] = bug_key
+        save(STATE / "ledger.json", ledger)
+    print(json.dumps({
+        "dry_run": not apply,
+        "linked_tests": len(results),
+        "passed": sum(not item[1] for item in results),
+        "failed": sum(item[1] for item in results),
+        "jira_candidates": sum(item[4] for item in results),
+    }))
+
+
+def quality_gate():
+    """Fail CI on an unpassed or missing Playwright result after publication."""
+    report = read(ROOT / "reports" / "playwright-results.json", {})
+    results = [
+        test.get("status")
+        for suite in report.get("suites", [])
+        for spec in walk_specs(suite)
+        for test in spec.get("tests", [])
+    ]
+    if not results:
+        raise RuntimeError("Missing Playwright execution results")
+    if any(status != "expected" for status in results):
+        raise RuntimeError("Playwright has failing, flaky or incomplete tests")
+    print(json.dumps({"quality_gate": "passed", "tests": len(results)}))
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("command", choices=["verify", "verify-jira-bug", "generate", "publish", "create-run", "sync", "prune-runs", "summary"])
+    p.add_argument("command", choices=["verify", "verify-jira-bug", "generate", "publish", "create-run", "sync", "prune-runs", "summary", "quality-gate"])
     p.add_argument("--apply", action="store_true")
     p.add_argument("--create-bugs", action="store_true")
     p.add_argument("--provider", choices=["mock", "openai"], default="mock")
@@ -449,6 +486,8 @@ def main():
             sync(args.apply, args.create_bugs)
         elif args.command == "prune-runs":
             prune_runs(args.apply)
+        elif args.command == "quality-gate":
+            quality_gate()
         else:
             execution_summary()
     except (RuntimeError, KeyError, ValueError, urllib.error.URLError) as exc:
