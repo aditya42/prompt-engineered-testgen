@@ -10,14 +10,14 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from test_generation import login
+from test_generation import cart, login
 from test_generation.failure_triage import classify_failure
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE = ROOT / "state"
 STATE.mkdir(exist_ok=True)
-REQUIREMENTS = login.REQUIREMENTS
-ALLOWED = set(login.ACTIONS)
+REQUIREMENTS = login.REQUIREMENTS + cart.REQUIREMENTS
+ALLOWED = set(login.ACTIONS) | set(cart.ACTIONS)
 
 def api(url, email, secret, method="GET", body=None, bearer=False):
     if not url.startswith("https://"):
@@ -66,21 +66,20 @@ def save(path, data):
 def generate(provider):
     """Ask OpenAI for login test cases, then validate before compilation."""
     if provider == "mock":
-        cases = login.mock_cases()
+        cases = login.mock_cases() + cart.mock_cases()
     else:
         key = os.getenv("OPENAI_API_KEY")
         if not key:
             raise RuntimeError("OPENAI_API_KEY is required for live generation")
         prompt = (
-            "You are an experienced QA engineer generating login test cases "
-            "for https://www.saucedemo.com/. Return a JSON object with a cases "
-            "array, exactly one test case for each supplied requirement. "
-            "For each case return id, intent, title, steps. Produce clear, "
-            "distinctive test titles. Preserve each requirement id and intent. "
-            "Use only the exact safe steps specified for each requirement; "
-            "do not invent executable actions or extra scenarios. "
-            "Cover valid credentials, invalid password, locked account, "
-            "missing username and missing password. Return JSON only."
+            "You are a QA test designer for https://www.saucedemo.com/. "
+            "Generate exactly one structured test case per supplied requirement "
+            "for login and post-login shopping cart behavior. Include both positive "
+            "and negative coverage. Return JSON object with cases array, each case "
+            "containing id, intent, title and steps. Preserve id and intent and use "
+            "the exact provided step sequence: only the title can be rephrased. "
+            "Do not invent code, unsupported operations or expected behavior. "
+            "All cart tests must log in as standard_user first. Return JSON only."
         )
         body = {
             "model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
@@ -98,7 +97,14 @@ def generate(provider):
             "", key, "POST", body, bearer=True,
         )
         cases = json.loads(response["choices"][0]["message"]["content"])["cases"]
-    cases = login.validate_cases(cases)
+    if not isinstance(cases, list):
+        raise RuntimeError("Generated test cases must be a list")
+    login.validate_cases([c for c in cases if isinstance(c, dict)
+                          and str(c.get("id", "")).startswith("LOGIN-")])
+    cart.validate_cases([c for c in cases if isinstance(c, dict)
+                         and str(c.get("id", "")).startswith("CART-")])
+    if len(cases) != len(REQUIREMENTS):
+        raise RuntimeError("Generated test cases are incomplete")
     save(STATE / "plan.json", {"cases": cases, "provider": provider})
     print(json.dumps({"provider": provider, "generated": len(cases),
                       "requirements_covered": len(REQUIREMENTS)}))
@@ -106,8 +112,13 @@ def generate(provider):
 
 
 def playwright(cases, mapping):
-    """Compile the login cases using the bounded Playwright action catalog."""
-    login.compile_playwright(cases, mapping, ROOT)
+    """Compile approved login and cart plans into separate Playwright specs."""
+    login.compile_playwright(
+        [case for case in cases if case["id"].startswith("LOGIN-")], mapping, ROOT
+    )
+    cart.compile_playwright(
+        [case for case in cases if case["id"].startswith("CART-")], mapping, ROOT
+    )
 
 
 def verify():
@@ -167,7 +178,7 @@ def publish(apply, provider):
             # Simple text fields; TestRail instances may require template-specific custom fields.
             result = tr("add_case/" + os.environ["TESTRAIL_SECTION_ID"], "POST", {
                 "title": "[" + c["id"] + "] " + c["title"],
-                "custom_preconds": "Public SauceDemo login page",
+                "custom_preconds": "Public SauceDemo demo environment; login before cart tests",
                 "custom_steps": "\n".join(c["steps"]),
                 "custom_expected": c["intent"]})
             mapping[c["id"]] = int(result["id"])
@@ -180,7 +191,7 @@ def publish(apply, provider):
 def testrail_run_name(github_run_id):
     """Build a descriptive, stable title for a BrowserStack CI test run."""
     return (
-        "SauceDemo | Login Regression | Playwright on BrowserStack "
+        "SauceDemo | Login + Cart Regression | Playwright on BrowserStack "
         f"(Chrome, Windows 11) | GitHub #{github_run_id}"
     )
 
@@ -244,7 +255,7 @@ def create_run(apply):
     else:
         print(json.dumps({"dry_run": True, "would_create": payload}))
 
-RUN_PREFIX = "SauceDemo login run "
+RUN_PREFIX = "SauceDemo | Login + Cart Regression | Playwright on BrowserStack "
 LEGACY_RUN_NAME = "PromptTestGen phase 2 controlled demo"
 
 def project_runs():
