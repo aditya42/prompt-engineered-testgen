@@ -62,6 +62,11 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Verify TestRail and Jira read access
         run: python -m test_generation.runner verify
+      - name: Prevent running the known training-defect demo with OpenAI
+        if: inputs.action == 'known-defect-demo' && inputs.provider != 'mock'
+        run: |
+          echo "::error::Select provider=mock for known-defect-demo"
+          exit 1
       - name: Verify BrowserStack and Jira configuration
         if: inputs.action != 'preview'
         run: |
@@ -72,25 +77,25 @@ jobs:
         if: inputs.action == 'preview'
         run: python -m test_generation.runner publish --provider ${{ inputs.provider }}
       - name: Publish login/cart cases and create TestRail run
-        if: inputs.action == 'full-demo'
+        if: inputs.action != 'preview'
         run: |
           python -m test_generation.runner publish --apply --provider ${{ inputs.provider }}
           python -m test_generation.runner create-run --apply
       - name: Install BrowserStack Node SDK
-        if: inputs.action == 'full-demo'
+        if: inputs.action != 'preview'
         run: npm install
       - name: Run Playwright on BrowserStack
-        if: inputs.action == 'full-demo'
+        if: inputs.action != 'preview'
         continue-on-error: true
         run: npx browserstack-node-sdk playwright test
       - name: Synchronize TestRail results
-        if: inputs.action == 'full-demo'
+        if: inputs.action != 'preview'
         run: python -m test_generation.runner sync --apply
       - name: Create Jira candidates for reproducible failures (label known demos)
-        if: inputs.action == 'full-demo'
+        if: inputs.action != 'preview'
         run: python -m test_generation.runner sync --apply --create-bugs
       - name: Enforce Playwright quality gate after result publishing
-        if: inputs.action == 'full-demo'
+        if: inputs.action != 'preview'
         run: python -m test_generation.runner quality-gate
       - name: Retain only the latest 3 TestRail runs in project 1
         if: ${{ always() && inputs.action != 'preview' }}
