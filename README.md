@@ -1,137 +1,96 @@
-# LLM Test Generation + BrowserStack + TestRail + Jira
+# LLM-Generated Login and Cart Testing — BrowserStack, TestRail and Jira
 
-Generate structured login tests with an LLM, run **Playwright on BrowserStack cloud browsers**, publish results to TestRail, and create Jira defect candidates only for reproducible application assertion failures.
+A reproducible quality-engineering demonstration that generates **five login** and **five add-to-cart** acceptance tests for the public [SauceDemo](https://www.saucedemo.com/) training store using an LLM or a deterministic mock. It compiles validated test plans into Playwright tests, executes them using BrowserStack, publishes automated results to TestRail, and triages reproducible assertion failures for Jira.
+
+## Test coverage
+
+| ID | Area | Positive / negative | Expected behavior |
+| --- | --- | --- | --- |
+| LOGIN-001 | Login | Positive | Valid standard user reaches inventory |
+| LOGIN-002 | Login | Negative | Incorrect password is rejected |
+| LOGIN-003 | Login | Negative | Locked account is rejected |
+| LOGIN-004 | Login | Negative | Empty username is rejected |
+| LOGIN-005 | Login | Negative | Empty password is rejected |
+| CART-001 | Add to cart | Positive | Adding a backpack updates the badge and cart |
+| CART-002 | Add to cart | Positive | Adding two products updates badge and cart |
+| CART-003 | Remove from cart | Negative / state reversal | Removing the backpack empties cart |
+| CART-004 | Empty cart | Negative / empty state | Fresh cart has no products or badge |
+| CART-005 | Duplicate prevention | Negative | Added product switches to Remove; one line item remains |
+
+All five cart scenarios perform a **fresh standard-user login** before interacting with products. Each browser test uses a new Playwright page. Test names carry stable requirement IDs and, when published, TestRail case IDs.
 
 ## Architecture
 
 ```text
-Login requirements (LOGIN-001 ... LOGIN-005)
-          |
-          v
-OpenAI / deterministic mock -> validate safe actions
-          |
-          v
-generated_tests/login.spec.ts (Playwright)
-          |
-          v
-BrowserStack Automate (remote Windows Chrome)
-          |
-          +-- Playwright JSON report + BrowserStack build
-          +-- TestRail: one linked automated result per test
-          +-- Jira: repeated assertion failures only (needs-triage)
-          +-- GitHub Actions: summary and retention
+Ten reviewed login and cart requirements
+           |
+OpenAI or deterministic mock generates structured titles and step plans
+           |
+Strict action/schema validation
+           |
+generated_tests/login.spec.ts + generated_tests/cart.spec.ts
+           |
+BrowserStack Playwright (Windows 11 Chrome)
+           |
+Playwright JSON -> TestRail automated run/results
+                       |
+              reproducible assertion failures
+                       |
+              Jira Bug candidates (needs-triage)
 ```
 
-**BrowserStack is the execution platform, not an application under test.** SauceDemo remains the public demo login website. Set `SAUCEDEMO_BASE_URL` to change the target URL, but the login selectors and scenarios must also be adapted for a different application.
+The LLM is **not allowed to execute arbitrary code**. It must preserve accepted step sequences and may propose readable test titles. The code compiler maps only predefined actions from `test_generation/login.py` and `test_generation/cart.py`.
 
-## Coverage
+## Quick start
 
-| Case | Scenario |
-| --- | --- |
-| LOGIN-001 | Valid standard-user login |
-| LOGIN-002 | Incorrect password |
-| LOGIN-003 | Locked user |
-| LOGIN-004 | Missing username |
-| LOGIN-005 | Missing password |
-
-The LLM produces test case titles and constrained steps, **not arbitrary executable code**. Test steps are validated against the reviewed action catalog in `test_generation/login.py`.
-
-## Structure
-
-```text
-test_generation/
-  login.py           Requirement catalog, bounded Playwright compiler
-  runner.py          OpenAI generation, TestRail sync, Jira sync, summary and CLI
-  failure_triage.py  Repeatability / assertion / infrastructure triage
-tests/
-  test_runner.py     Offline unit tests and integration safety checks
-browserstack.yml     Cloud browser capabilities and build reporting
-playwright.config.ts Playwright JSON reporting, 1 CI retry, traces
-.github/workflows/
-  test-generation.yml   Manually run BrowserStack -> TestRail -> Jira
-  code-quality.yml      Local mock + lint/Playwright regression tests
-docs/
-  ARCHITECTURE.md
-  INTEGRATION_GUIDE.md
-```
-
-## Set up BrowserStack
-
-Create a BrowserStack Automate account and find its **Username** and **Access Key**. Add these as GitHub repository Actions secrets:
-
-| Secret | Purpose |
-| --- | --- |
-| `BROWSERSTACK_USERNAME` | BrowserStack authentication |
-| `BROWSERSTACK_ACCESS_KEY` | BrowserStack authentication |
-| `TESTRAIL_EMAIL`, `TESTRAIL_API_KEY` | Publish test cases and results |
-| `JIRA_EMAIL`, `JIRA_API_TOKEN` | Create/reuse Jira Bug candidates |
-| `OPENAI_API_KEY` | Needed for the `openai` generation provider |
-
-Do not put credentials in `browserstack.yml` or commit them. The SDK uses the environment variables from GitHub Actions secrets.
-
-## Run locally
-
-Requires Python 3.12+, Node.js 22+, and the BrowserStack SDK:
+Requires Python 3.12+, Node.js 22+, and Playwright Chromium for local execution.
 
 ```bash
 npm install
-
-# Generate five deterministic test cases without an LLM API call
-python -m test_generation.runner generate --provider mock
-
-# Run locally (requires Playwright browser installation)
 npx playwright install chromium
+python -m test_generation.runner generate --provider mock
 npx playwright test
-
-# Execute on BrowserStack with exported BrowserStack credentials
-npm run test:browserstack
-
-# Offline tests
 python -m unittest discover -s tests -v
 ```
 
-For real LLM generation, configure `OPENAI_API_KEY` then use `python -m test_generation.runner generate --provider openai`.
+For real LLM generation, configure `OPENAI_API_KEY` and use `python -m test_generation.runner generate --provider openai`.
 
-BrowserStack's documented Playwright Node SDK integrates through `browserstack.yml` and `npx browserstack-node-sdk playwright test`. See [BrowserStack documentation](https://www.browserstack.com/docs/automate/playwright/getting-started/nodejs/integrate-your-tests).
+For BrowserStack execution, configure `BROWSERSTACK_USERNAME` and `BROWSERSTACK_ACCESS_KEY` and run `npm run test:browserstack`.
 
-## Connected workflow
+## GitHub Actions integration
 
-[Open the BrowserStack execution workflow](https://github.com/aditya42/prompt-engineered-testgen/actions/workflows/test-generation.yml).
+[Run the BrowserStack → TestRail → Jira workflow](https://github.com/aditya42/prompt-engineered-testgen/actions/workflows/test-generation.yml).
 
-| Mode | Behavior |
-| --- | --- |
-| `preview` | Generate test cases without remote TestRail/Jira writes |
-| `full-demo` | Run Playwright on BrowserStack, sync results to TestRail, triage failures for Jira |
+- **`preview`** generates ten plans and Playwright specs without writing to TestRail or Jira.
+- **`full-demo`** publishes/reuses ten test cases, creates a TestRail run, runs Playwright on BrowserStack, synchronizes results and triages eligible failures for Jira.
+- Choose provider `mock` for deterministic checks or `openai` for real LLM case-generation API calls.
 
-Choose `openai` for genuine LLM case generation; `mock` remains useful for repeatable engineering checks. The workflow verifies BrowserStack credentials before publishing a TestRail run. The cloud execution step may fail while the downstream result sync still runs; the **quality gate reports failure after publishing**.
+Secrets required: `BROWSERSTACK_USERNAME`, `BROWSERSTACK_ACCESS_KEY`, `TESTRAIL_EMAIL`, `TESTRAIL_API_KEY`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, plus `OPENAI_API_KEY` for LLM generation.
 
-## Jira defect-creation policy
+## Genuine defects versus synthetic failures
 
-**Automatic Jira tickets are limited to high-confidence candidates, not guaranteed true product defects.** A failed test becomes eligible only when:
+This repository does **not** deliberately break SauceDemo and label the outcome a genuine production defect. SauceDemo is a public third-party demonstration site; the account `problem_user` has intentionally problematic training behavior. A test against that account can show a **known demonstration fault**, not establish a newly discovered production defect.
 
-1. The same test fails on its original attempt **and retry**.
-2. Both failure messages contain recognizable Playwright assertion evidence.
-3. There is no evident BrowserStack, connection, browser or timeout failure.
-4. The test maps to a TestRail case and passes the duplicate-issue check.
+The standard-user regression tests can reveal **actual observed failures**. The Jira automation marks these as `needs-triage` candidates only if both the first attempt and retry fail with application assertion evidence and no recognized infrastructure failure. A human must inspect traces, product behavior and expected requirements before confirming a genuine defect.
 
-Tickets are labeled `browserstack`, `automated-qa`, and `needs-triage`, and include the case title, TestRail run and error evidence. A human should verify whether the application, test code, data or environment caused the problem. Flaky tests, missing reports, infrastructure failures and unclassified failures **do not generate automatic Jira Bugs**. Such executions still fail the quality gate.
+No Jira Bug is automatically filed solely because an assertion was artificially made wrong. TestRail records Passed, Failed or Retest independently of Jira triage. Failures still fail the CI quality gate.
 
-## TestRail naming convention
+## TestRail history retention
 
-New TestRail runs use a descriptive title, for example:
+The connected workflow maintains your requested limit of the **latest three test runs in TestRail project 1** and **permanently deletes older runs in that project**, including unrelated project runs. Test cases and Jira issues are not deleted. Export historical evidence before a connected run.
 
-`SauceDemo | Login Regression | Playwright on BrowserStack (Chrome, Windows 11) | GitHub #41327291819`
+## Repository
 
-The GitHub run ID preserves traceability and makes retries idempotent. The legacy TestRail run **R9** can be renamed without changing results through the one-time [Rename Existing TestRail Run R9](https://github.com/aditya42/prompt-engineered-testgen/actions/workflows/rename-testrail-r9.yml) workflow. This operation only updates the name; it does not create/delete runs or alter case results.
+- `test_generation/login.py` — five login scenarios
+- `test_generation/cart.py` — five post-login cart scenarios
+- `test_generation/runner.py` — test-case generation, TestRail/Jira synchronization, CLI
+- `test_generation/failure_triage.py` — repeat-failure qualification
+- `tests/test_runner.py` — isolated regression tests
+- `browserstack.yml` — cloud browser configuration
+- `docs/ARCHITECTURE.md`, `docs/INTEGRATION_GUIDE.md` — implementation and operations
 
-## TestRail result and retention policy
+## Validation
 
-Every executed Playwright test with a linked `[TR:C...] ` marker is synchronized to TestRail. Passing results use Passed; unexpected failures use Failed. A Jira issue is an additional triaged artifact, not a replacement for a failed TestRail result.
+The original five login flows were verified on BrowserStack and synchronized to TestRail in [run 41327291819](https://github.com/aditya42/prompt-engineered-testgen/actions/runs/41327291819). The new five cart cases need their own completed CI/browser execution before being described as verified. See the [quality checks](https://github.com/aditya42/prompt-engineered-testgen/actions/workflows/code-quality.yml).
 
-The existing workflow **permanently deletes every TestRail run older than the newest three in project 1**, including unrelated runs. Test cases and Jira issues are preserved. Export any historical run results before using `full-demo`.
-
-## Validation status
-
-Previously, five login tests passed on a local GitHub Actions runner. The BrowserStack integration and automatic Jira triage now require a **new credentialed cloud workflow run** to verify real remote sessions, BrowserStack build visibility, result synchronization and Jira creation behavior. No new cloud sessions or production defects are claimed until that validation succeeds.
-
-See [architecture](docs/ARCHITECTURE.md), [integration guide](docs/INTEGRATION_GUIDE.md), and [contribution guidelines](CONTRIBUTING.md).
+Coding follows PEP 8 and favors KISS, DRY, YAGNI, separation of concerns, and avoiding speculative infrastructure.
