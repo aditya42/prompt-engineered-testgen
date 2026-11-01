@@ -16,9 +16,15 @@ from test_generation.failure_triage import classify_failure
 ROOT = Path(__file__).resolve().parent.parent
 STATE = ROOT / "state"
 STATE.mkdir(exist_ok=True)
-REQUIREMENTS = (login.REQUIREMENTS + cart.REQUIREMENTS
-                + (known_defect.REQUIREMENTS if os.getenv('KNOWN_DEFECT_DEMO') == 'true' else []))
+REQUIREMENTS = login.REQUIREMENTS + cart.REQUIREMENTS
 ALLOWED = set(login.ACTIONS) | set(cart.ACTIONS)
+
+
+def active_requirements():
+    """Include the training defect only for the opt-in demo execution."""
+    if os.getenv("KNOWN_DEFECT_DEMO") == "true":
+        return REQUIREMENTS + known_defect.REQUIREMENTS
+    return REQUIREMENTS
 
 def api(url, email, secret, method="GET", body=None, bearer=False):
     if not url.startswith("https://"):
@@ -92,7 +98,7 @@ def generate(provider):
             "messages": [
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": json.dumps({
-                    "requirements": REQUIREMENTS,
+                    "requirements": active_requirements(),
                     "allowed_actions": sorted(ALLOWED),
                 })},
             ],
@@ -113,11 +119,11 @@ def generate(provider):
             case for case in cases if isinstance(case, dict)
             and case.get("id") == "DEMO-001"
         ])
-    if len(cases) != len(REQUIREMENTS):
+    if len(cases) != len(active_requirements()):
         raise RuntimeError("Generated test cases are incomplete")
     save(STATE / "plan.json", {"cases": cases, "provider": provider})
     print(json.dumps({"provider": provider, "generated": len(cases),
-                      "requirements_covered": len(REQUIREMENTS)}))
+                      "requirements_covered": len(active_requirements())}))
     return cases
 
 
