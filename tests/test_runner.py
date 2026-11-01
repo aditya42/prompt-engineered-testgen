@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from test_generation import cart, login, runner
+from test_generation import cart, known_defect, login, runner
 from test_generation.failure_triage import classify_failure
 
 
@@ -84,6 +84,43 @@ class LoginGenerationTests(unittest.TestCase):
         self.assertIn("Username is required", spec)
         self.assertIn("Password is required", spec)
         self.assertIn("inventory", spec)
+
+    def test_known_training_defect_is_opt_in_and_labelled(self):
+        requirements = login.REQUIREMENTS + cart.REQUIREMENTS + known_defect.REQUIREMENTS
+        with patch.dict(os.environ, {"KNOWN_DEFECT_DEMO": "true"}):
+            with patch.object(runner, "REQUIREMENTS", requirements):
+                cases = runner.generate("mock")
+                self.assertEqual(len(cases), 11)
+                runner.playwright(cases, {})
+        spec = (self.root / "generated_tests" / "known_defect.spec.ts").read_text()
+        self.assertIn("problem_user", spec)
+        self.assertIn("DEMO-001", spec)
+        self.assertIn("add-to-cart-sauce-labs-fleece-jacket", spec)
+        self.assertNotIn("intentional-demo-failure", spec)
+
+    def test_normal_generation_cleans_old_training_defect_spec(self):
+        folder = self.root / "generated_tests"
+        folder.mkdir()
+        old = folder / "known_defect.spec.ts"
+        old.write_text("stale")
+        runner.playwright(runner.generate("mock"), {})
+        self.assertFalse(old.exists())
+
+    def test_known_training_defect_quality_gate_requires_baseline_pass(self):
+        reports = self.root / "reports"
+        reports.mkdir()
+        good_cases = [
+            {"title": "[LOGIN-001] pass", "tests": [{"status": "expected"}]}
+            for _ in range(10)
+        ]
+        (reports / "playwright-results.json").write_text(json.dumps({
+            "suites": [{"specs": good_cases + [{
+                "title": "[DEMO-001] known training failure",
+                "tests": [{"status": "unexpected"}],
+            }]}],
+        }))
+        with patch.dict(os.environ, {"KNOWN_DEFECT_DEMO": "true"}):
+            runner.quality_gate()
 
     def test_cart_positive_and_negative_specs_generated(self):
         runner.playwright(runner.generate("mock"), {})
