@@ -37,7 +37,7 @@ def compile_playwright(cases, mapping, root):
     """Check actual demo behavior; do not inject a deliberately wrong expected value."""
     validate_cases(cases)
     item = cases[0]
-    prefix = f"[TR:C{mapping[item['id']}]" if item["id"] in mapping else ""
+    prefix = f"[TR:C{mapping[item['id']]}]" if item["id"] in mapping else ""
     title = f"{prefix} [DEMO-001] {item['title']}".strip()
     statements = [
         "await page.goto('/');",
