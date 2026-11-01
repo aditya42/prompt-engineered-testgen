@@ -302,16 +302,21 @@ def execution_summary():
                  for t in sp.get("tests", []) if t.get("status") == "unexpected")
     passed = sum(1 for s in report.get("suites", []) for sp in walk_specs(s)
                  for t in sp.get("tests", []) if t.get("status") == "expected")
+    flaky = sum(1 for suite in report.get("suites", [])
+                for spec in walk_specs(suite)
+                for test in spec.get("tests", [])
+                if test.get("status") == "flaky")
     lines = ["## PromptTestGen — execution report", "",
              f"- GitHub action: {os.getenv('DEMO_ACTION', 'local')}",
              f"- Generation provider: {read(STATE / 'plan.json', {}).get('provider', 'n/a')}",
-             f"- Playwright: **{passed} passed / {failed} failed**",
+             f"- Playwright: **{passed} passed / {failed} failed / {flaky} flaky**",
              "- Retention: last **3** TestRail project runs; deleted: "
              + (", ".join("R" + str(n) for n in retention.get("deleted", [])) or "none"),
              "", "| Resource | Link |", "| --- | --- |"]
     for req, cid in sorted(case_map.items()):
         lines.append(f"| TestRail case {req} | [C{cid}]({tr_url}/index.php?/cases/view/{cid}) |")
     if run_id:
+        lines.append("| BrowserStack builds | [Open BrowserStack Automate](https://automate.browserstack.com/dashboard/v2) |")
         lines.append(f"| TestRail execution | [R{run_id}]({tr_url}/index.php?/runs/view/{run_id}) |")
     for key in jira_keys:
         if re.fullmatch(r"[A-Z][A-Z0-9_]*-[0-9]+", key):
