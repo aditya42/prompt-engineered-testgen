@@ -223,6 +223,28 @@ class LoginGenerationTests(unittest.TestCase):
         ledger = runner.read(self.state / "ledger.json", {})
         self.assertEqual(ledger["23:12:failed"]["jira_key"], "KAN-101")
 
+    def test_flaky_result_is_retest_in_testrail_not_jira_bug(self):
+        runner.save(self.state / "run.json", {"id": 24})
+        reports = self.root / "reports"
+        reports.mkdir()
+        (reports / "playwright-results.json").write_text(json.dumps({
+            "suites": [{"specs": [{
+                "title": "[TR:C12] [LOGIN-001] flaky login",
+                "tests": [{
+                    "status": "flaky",
+                    "results": [
+                        {"status": "failed", "error": {"message": "expect(page) failed"}},
+                        {"status": "passed"},
+                    ],
+                }],
+            }]}],
+        }))
+        with patch.object(runner, "tr", return_value={"id": 20}) as testrail:
+            with patch.object(runner, "jira") as jira_api:
+                runner.sync(True, True)
+        self.assertEqual(testrail.call_args[0][2]["status_id"], 4)
+        jira_api.assert_not_called()
+
     def test_missing_report_fails_quality_gate(self):
         with self.assertRaisesRegex(RuntimeError, "Missing Playwright"):
             runner.quality_gate()
