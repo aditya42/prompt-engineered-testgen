@@ -26,6 +26,7 @@ class LoginGenerationTests(unittest.TestCase):
             "TESTRAIL_PROJECT_ID": "1",
             "TESTRAIL_SECTION_ID": "1",
             "TESTRAIL_RETENTION_SCOPE": "managed",
+            "KNOWN_DEFECT_DEMO": "false",
             "GITHUB_RUN_ID": "fixture-run",
         })
         env.start()
@@ -86,12 +87,10 @@ class LoginGenerationTests(unittest.TestCase):
         self.assertIn("inventory", spec)
 
     def test_known_training_defect_is_opt_in_and_labelled(self):
-        requirements = login.REQUIREMENTS + cart.REQUIREMENTS + known_defect.REQUIREMENTS
         with patch.dict(os.environ, {"KNOWN_DEFECT_DEMO": "true"}):
-            with patch.object(runner, "REQUIREMENTS", requirements):
-                cases = runner.generate("mock")
-                self.assertEqual(len(cases), 11)
-                runner.playwright(cases, {})
+            cases = runner.generate("mock")
+            self.assertEqual(len(cases), 11)
+            runner.playwright(cases, {})
         spec = (self.root / "generated_tests" / "known_defect.spec.ts").read_text()
         self.assertIn("problem_user", spec)
         self.assertIn("DEMO-001", spec)
