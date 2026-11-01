@@ -7,8 +7,6 @@ not deliberate product failures.
 import json
 from pathlib import Path
 
-from test_generation import login
-
 
 REQUIREMENTS = [
     {"id": "CART-001", "intent": "single_item",
