@@ -133,6 +133,8 @@ def playwright(cases, mapping):
         known_defect.compile_playwright(
             [case for case in cases if case["id"] == "DEMO-001"], mapping, ROOT
         )
+    else:
+        (ROOT / "generated_tests" / "known_defect.spec.ts").unlink(missing_ok=True)
 
 
 def verify():
