@@ -63,6 +63,7 @@ For BrowserStack execution, configure `BROWSERSTACK_USERNAME` and `BROWSERSTACK_
 
 - **`preview`** generates ten plans and Playwright specs without writing to TestRail or Jira.
 - **`full-demo`** publishes/reuses ten test cases, creates a TestRail run, runs Playwright on BrowserStack, synchronizes results and triages eligible failures for Jira.
+- **`known-defect-demo`** (provider **`mock`** only) runs the ten standard cases plus one opt-in `DEMO-001` against SauceDemo's intentionally broken `problem_user` account. If the add-to-cart failure repeats, it publishes the failed TestRail result and creates/reuses an **actual Jira Bug record labeled `known-training-defect` and `synthetic-demo`**. It is a reproduction of a pre-existing training defect, not a newly discovered production defect.
 - Choose provider `mock` for deterministic checks or `openai` for real LLM case-generation API calls.
 
 Secrets required: `BROWSERSTACK_USERNAME`, `BROWSERSTACK_ACCESS_KEY`, `TESTRAIL_EMAIL`, `TESTRAIL_API_KEY`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, plus `OPENAI_API_KEY` for LLM generation.
@@ -74,6 +75,17 @@ This repository does **not** deliberately break SauceDemo and label the outcome 
 The standard-user regression tests can reveal **actual observed failures**. The Jira automation marks these as `needs-triage` candidates only if both the first attempt and retry fail with application assertion evidence and no recognized infrastructure failure. A human must inspect traces, product behavior and expected requirements before confirming a genuine defect.
 
 No Jira Bug is automatically filed solely because an assertion was artificially made wrong. TestRail records Passed, Failed or Retest independently of Jira triage. Failures still fail the CI quality gate.
+
+## Validating product failure and Jira creation
+
+For a demonstration backed by **observed website behavior**, select **`known-defect-demo`** with **provider `mock`**. This adds:
+
+- `DEMO-001`: Log in with public `problem_user` credentials, attempt to add the Sauce Labs Fleece Jacket, and verify the cart badge increments to `1`.
+- SauceDemo's `problem_user` account is intentionally broken; public reports describe this add-to-cart action as nonfunctional. The test does not inject an incorrect assertion.
+- If both BrowserStack attempts fail with application-assertion evidence, the automated TestRail result is **Failed**, and Jira receives a deduplicated **known training defect** issue, not a claimed new production bug.
+- A special quality gate considers the demonstration successful only if **all ten baseline tests pass** and `DEMO-001` fails as expected. If the demo behavior changes or the baseline fails, the workflow reports failure.
+
+No Jira ticket exists for this new demonstration until the workflow actually runs successfully. The ordinary `full-demo` mode continues to file only **candidate** genuine bugs for unexpected, repeatable failures that require human triage.
 
 ## TestRail history retention
 
