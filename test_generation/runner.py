@@ -466,7 +466,10 @@ def sync(apply, create_bugs):
             continue
         if ledger[fingerprint].get("jira_key"):
             continue
-        label = f"autotest-login-c{cid}"
+        is_training_demo = ("[DEMO-001]" in title
+                            and os.getenv("KNOWN_DEFECT_DEMO") == "true")
+        label = (f"known-saucedemo-demo-c{cid}" if is_training_demo
+                 else f"autotest-regression-c{cid}")
         key = os.environ["JIRA_PROJECT_KEY"]
         query = urllib.parse.urlencode({
             "jql": f'project = "{key}" AND labels = "{label}"',
@@ -477,19 +480,29 @@ def sync(apply, create_bugs):
             bug_key = existing[0]["key"]
         else:
             issue_type_id = jira_issue_type(key)
+            classification = (
+                "KNOWN SAUCEDEMO TRAINING DEFECT: problem_user is intentionally "
+                "broken. This is not a newly discovered production defect."
+                if is_training_demo else
+                "Candidate application defect; requires human root-cause review."
+            )
             description = (
                 "Repeated Playwright application assertion failure on BrowserStack.\\n"
-                "Classification: candidate product defect; requires human triage.\\n"
-                "TestRail run: " + str(run_id) + "\\nTest: " + title
+                + classification + "\\n"
+                + "TestRail run: " + str(run_id) + "\\nTest: " + title
                 + "\\nEvidence: " + message
                 + "\\nGitHub run: " + os.getenv("GITHUB_RUN_ID", "local")
             )
             body = {"fields": {
                 "project": {"key": key},
                 "issuetype": {"id": issue_type_id},
-                "summary": f"[Automation] {title}"[:240],
+                "summary": (("[KNOWN TRAINING DEFECT] " if is_training_demo
+                             else "[Automation] ") + title)[:240],
                 "description": adf(description),
-                "labels": ["automated-qa", "browserstack", "needs-triage", label],
+                "labels": (["automated-qa", "browserstack", "synthetic-demo",
+                            "known-training-defect", label] if is_training_demo
+                           else ["automated-qa", "browserstack",
+                                 "needs-triage", label]),
             }}
             bug_key = jira("issue", "POST", body)["key"]
         ledger[fingerprint]["jira_key"] = bug_key
@@ -515,6 +528,21 @@ def quality_gate():
     ]
     if not results:
         raise RuntimeError("Missing Playwright execution results")
+    if os.getenv("KNOWN_DEFECT_DEMO") == "true":
+        baseline = []
+        demo = []
+        for suite in report.get("suites", []):
+            for spec in walk_specs(suite):
+                for test in spec.get("tests", []):
+                    (demo if "[DEMO-001]" in spec.get("title", "") else baseline).append(
+                        test.get("status")
+                    )
+        if (len(baseline) != 10 or any(status != "expected" for status in baseline)
+                or demo != ["unexpected"]):
+            raise RuntimeError("Known training-defect reproduction did not meet expectations")
+        print(json.dumps({"quality_gate": "known_defect_reproduced",
+                          "baseline_passed": 10, "training_defects": 1}))
+        return
     if any(status != "expected" for status in results):
         raise RuntimeError("Playwright has failing, flaky or incomplete tests")
     print(json.dumps({"quality_gate": "passed", "tests": len(results)}))
