@@ -33,3 +33,11 @@ The `full-demo` workflow verifies BrowserStack credentials before creating a Tes
 Jira classification is intentionally conservative. Two identical failing outcomes plus assertion evidence is not proof of a product defect; created Jira tickets are labeled `needs-triage` and require human review. Infrastructure/network failures are excluded from automatic tickets.
 
 The existing live TestRail cleanup keeps the newest three execution runs in project 1, permanently removing older runs in that project, including unrelated runs. It does not remove test cases or Jira issues.
+
+## Add-to-cart and known training-defect test
+
+The default regression suite contains five login scenarios and five post-login cart scenarios. Cart tests cover single/multiple item addition, removal, empty state, and duplicate prevention. The action compiler lives in `test_generation/cart.py`.
+
+The separate `known-defect-demo` manual workflow option (provider `mock` only) includes `DEMO-001`, which logs in as SauceDemo's publicly documented intentionally defective `problem_user`, attempts to add the Sauce Labs Fleece Jacket and verifies the cart badge. If this known fault reproduces twice with assertion evidence, it is published as a Failed TestRail result and a Jira Bug **labeled `known-training-defect` and `synthetic-demo`**. It is a real execution of a known demo defect, not proof of a newly discovered production bug.
+
+The training workflow's quality gate expects ten baseline passes plus one failing demo. For ordinary `full-demo` runs, unexpected repeated assertion failures are filed only as `needs-triage` Jira candidates. The absence of a defect cannot be simulated as a genuine bug by intentionally changing assertions.
