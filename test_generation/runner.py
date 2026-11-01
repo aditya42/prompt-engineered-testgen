@@ -368,7 +368,7 @@ def sync(apply, create_bugs):
     results = []
     for suite in report.get("suites", []):
         for spec in walk_specs(suite):
-            marker = re.search(r"\\[TR:C(\\d+)\\]", spec.get("title", ""))
+            marker = re.search(r"\[TR:C(\d+)\]", spec.get("title", ""))
             if not marker:
                 continue
             case_id = int(marker.group(1))
