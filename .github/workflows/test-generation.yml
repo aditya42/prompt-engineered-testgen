@@ -11,6 +11,7 @@ on:
         options:
           - preview
           - full-demo
+          - known-defect-demo
       provider:
         description: "Generate login test cases with OpenAI, or use offline mock"
         type: choice
@@ -45,6 +46,7 @@ jobs:
       JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DEMO_ACTION: ${{ inputs.action }}
+      KNOWN_DEFECT_DEMO: ${{ inputs.action == 'known-defect-demo' }}
       BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
       BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
       SAUCEDEMO_BASE_URL: https://www.saucedemo.com
@@ -61,7 +63,7 @@ jobs:
       - name: Verify TestRail and Jira read access
         run: python -m test_generation.runner verify
       - name: Verify BrowserStack and Jira configuration
-        if: inputs.action == 'full-demo'
+        if: inputs.action != 'preview'
         run: |
           test -n "$BROWSERSTACK_USERNAME" || { echo "::error::Missing BROWSERSTACK_USERNAME secret"; exit 1; }
           test -n "$BROWSERSTACK_ACCESS_KEY" || { echo "::error::Missing BROWSERSTACK_ACCESS_KEY secret"; exit 1; }
@@ -69,7 +71,7 @@ jobs:
       - name: Generate and preview case (no writes)
         if: inputs.action == 'preview'
         run: python -m test_generation.runner publish --provider ${{ inputs.provider }}
-      - name: Publish SauceDemo login cases and create TestRail run
+      - name: Publish login/cart cases and create TestRail run
         if: inputs.action == 'full-demo'
         run: |
           python -m test_generation.runner publish --apply --provider ${{ inputs.provider }}
@@ -84,7 +86,7 @@ jobs:
       - name: Synchronize TestRail results
         if: inputs.action == 'full-demo'
         run: python -m test_generation.runner sync --apply
-      - name: Create Jira issues only for reproducible application failures
+      - name: Create Jira candidates for reproducible failures (label known demos)
         if: inputs.action == 'full-demo'
         run: python -m test_generation.runner sync --apply --create-bugs
       - name: Enforce Playwright quality gate after result publishing
