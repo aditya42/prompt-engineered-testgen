@@ -185,6 +185,44 @@ class LoginGenerationTests(unittest.TestCase):
                 runner.sync(True, True)
         jira_api.assert_not_called()
 
+    def test_sync_creates_jira_candidate_for_repeated_assertion(self):
+        runner.save(self.state / "run.json", {"id": 23})
+        reports = self.root / "reports"
+        reports.mkdir()
+        (reports / "playwright-results.json").write_text(json.dumps({
+            "suites": [{"specs": [{
+                "title": "[TR:C12] [LOGIN-001] valid login",
+                "tests": [{"status": "unexpected", "results": [{
+                    "status": "failed",
+                    "error": {"message": "expect(page).toHaveURL failed"},
+                }, {
+                    "status": "failed",
+                    "error": {"message": "expect(page).toHaveURL failed"},
+                }]}],
+            }]}],
+        }))
+
+        jira_calls = []
+
+        def fake_jira(endpoint, method="GET", body=None):
+            jira_calls.append((endpoint, method))
+            if endpoint.startswith("search/jql?"):
+                return {"issues": []}
+            if endpoint.startswith("project/"):
+                return {"issueTypes": [{"name": "Bug", "id": "10010"}]}
+            if endpoint == "issue" and method == "POST":
+                self.assertIn("needs-triage", body["fields"]["labels"])
+                return {"key": "KAN-101"}
+            raise AssertionError(endpoint)
+
+        with patch.dict(os.environ, {"JIRA_PROJECT_KEY": "KAN"}):
+            with patch.object(runner, "tr", return_value={"id": 15}):
+                with patch.object(runner, "jira", side_effect=fake_jira):
+                    runner.sync(True, True)
+        self.assertIn(("issue", "POST"), jira_calls)
+        ledger = runner.read(self.state / "ledger.json", {})
+        self.assertEqual(ledger["23:12:failed"]["jira_key"], "KAN-101")
+
     def test_missing_report_fails_quality_gate(self):
         with self.assertRaisesRegex(RuntimeError, "Missing Playwright"):
             runner.quality_gate()
