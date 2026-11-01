@@ -1,17 +1,16 @@
-name: SauceDemo Login — LLM Test Generation
+name: BrowserStack Playwright - TestRail and Jira
 
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: "Read-only preview or live login-case demo"
+        description: "Preview or execute browser tests remotely"
         type: choice
         required: true
         default: preview
         options:
           - preview
           - full-demo
-          - jira-demo
       provider:
         description: "Generate login test cases with OpenAI, or use offline mock"
         type: choice
@@ -45,8 +44,9 @@ jobs:
       JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
       JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      DEMO_INJECT_FAILURE: ${{ inputs.action == 'jira-demo' }}
       DEMO_ACTION: ${{ inputs.action }}
+      BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
       SAUCEDEMO_BASE_URL: https://www.saucedemo.com
     steps:
       - uses: actions/checkout@v4
@@ -60,32 +60,36 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Verify TestRail and Jira read access
         run: python -m test_generation.runner verify
-      - name: Verify Jira Bug issue type before creating demo records
-        if: inputs.action == 'jira-demo'
-        run: python -m test_generation.runner verify-jira-bug
+      - name: Verify BrowserStack and Jira configuration
+        if: inputs.action == 'full-demo'
+        run: |
+          test -n "$BROWSERSTACK_USERNAME" || { echo "::error::Missing BROWSERSTACK_USERNAME secret"; exit 1; }
+          test -n "$BROWSERSTACK_ACCESS_KEY" || { echo "::error::Missing BROWSERSTACK_ACCESS_KEY secret"; exit 1; }
+          python -m test_generation.runner verify-jira-bug
       - name: Generate and preview case (no writes)
         if: inputs.action == 'preview'
         run: python -m test_generation.runner publish --provider ${{ inputs.provider }}
       - name: Publish SauceDemo login cases and create TestRail run
-        if: inputs.action != 'preview'
+        if: inputs.action == 'full-demo'
         run: |
           python -m test_generation.runner publish --apply --provider ${{ inputs.provider }}
           python -m test_generation.runner create-run --apply
-      - name: Install browser dependencies
-        if: inputs.action != 'preview'
-        run: |
-          npm install
-          npx playwright install --with-deps chromium
-      - name: Run generated Playwright test
-        if: inputs.action != 'preview'
+      - name: Install BrowserStack Node SDK
+        if: inputs.action == 'full-demo'
+        run: npm install
+      - name: Run Playwright on BrowserStack
+        if: inputs.action == 'full-demo'
         continue-on-error: true
-        run: npx playwright test
+        run: npx browserstack-node-sdk playwright test
       - name: Synchronize TestRail results
-        if: inputs.action != 'preview'
+        if: inputs.action == 'full-demo'
         run: python -m test_generation.runner sync --apply
-      - name: Create or reconcile synthetic Jira issue
-        if: inputs.action == 'jira-demo'
+      - name: Create Jira issues only for reproducible application failures
+        if: inputs.action == 'full-demo'
         run: python -m test_generation.runner sync --apply --create-bugs
+      - name: Enforce Playwright quality gate after result publishing
+        if: inputs.action == 'full-demo'
+        run: python -m test_generation.runner quality-gate
       - name: Retain only the latest 3 TestRail runs in project 1
         if: ${{ always() && inputs.action != 'preview' }}
         run: |
