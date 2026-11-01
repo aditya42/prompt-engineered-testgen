@@ -116,6 +116,14 @@ Choose `openai` for genuine LLM case generation; `mock` remains useful for repea
 
 Tickets are labeled `browserstack`, `automated-qa`, and `needs-triage`, and include the case title, TestRail run and error evidence. A human should verify whether the application, test code, data or environment caused the problem. Flaky tests, missing reports, infrastructure failures and unclassified failures **do not generate automatic Jira Bugs**. Such executions still fail the quality gate.
 
+## TestRail naming convention
+
+New TestRail runs use a descriptive title, for example:
+
+`SauceDemo | Login Regression | Playwright on BrowserStack (Chrome, Windows 11) | GitHub #41327291819`
+
+The GitHub run ID preserves traceability and makes retries idempotent. The legacy TestRail run **R9** can be renamed without changing results through the one-time [Rename Existing TestRail Run R9](https://github.com/aditya42/prompt-engineered-testgen/actions/workflows/rename-testrail-r9.yml) workflow. This operation only updates the name; it does not create/delete runs or alter case results.
+
 ## TestRail result and retention policy
 
 Every executed Playwright test with a linked `[TR:C...] ` marker is synchronized to TestRail. Passing results use Passed; unexpected failures use Failed. A Jira issue is an additional triaged artifact, not a replacement for a failed TestRail result.
