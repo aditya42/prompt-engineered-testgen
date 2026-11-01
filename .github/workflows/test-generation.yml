@@ -117,4 +117,6 @@ jobs:
             state/
             reports/
             generated_tests/
+            browserstack-artifacts/
+            test-results/
           if-no-files-found: ignore
